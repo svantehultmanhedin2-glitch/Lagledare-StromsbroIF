@@ -83,14 +83,14 @@ function ensureSeed() {
       name: "Ledare 1",
       role: "leader",
       pinHash: hashPin("1111"),
-      teamIds: ["P14", "P/F15"],
+      teamIds: ["P14", "P15"],
     },
     {
       id: "u-led2",
       name: "Ledare 2",
       role: "leader",
       pinHash: hashPin("2222"),
-      teamIds: ["F12"],
+      teamIds: ["F11/12"],
     },
   ]);
 
@@ -131,22 +131,26 @@ function useRoute() {
 }
 
 /* ================= Notifications ================= */
-function notifKey(userId) {
-  return `notifications:${userId}`;
+async function apiGetNotifs(userId) {
+  const r = await fetch(`/api/notifications-get?userId=${encodeURIComponent(userId)}`);
+  if (!r.ok) throw new Error("Kunde inte hämta notiser");
+  return await r.json();
 }
-function addNotification(userId, message) {
-  const list = jget(notifKey(userId), []);
-  jset(notifKey(userId), [
-    { id: uuid(), message, createdAt: new Date().toISOString(), read: false },
-    ...list,
-  ]);
+
+async function apiAddNotif(userId, message) {
+  await fetch("/api/notifications-add", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ userId, message }),
+  });
 }
-function markNotifRead(userId, id) {
-  const list = jget(notifKey(userId), []);
-  jset(
-    notifKey(userId),
-    list.map((n) => (n.id === id ? { ...n, read: true } : n))
-  );
+
+async function apiMarkNotifRead(userId, notifId) {
+  await fetch("/api/notifications-read", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ userId, notifId }),
+  });
 }
 
 /* ================= Auth ================= */
@@ -160,7 +164,7 @@ function useAuth() {
     if (u.pinHash !== hashPin(pin)) return { ok: false, msg: "Fel PIN" };
     jset("auth:user", u);
     setUser(u);
-    addNotification(u.id, "Inloggad ✅");
+    apiAddNotif(u.id, "Inloggad ✅");
     return { ok: true };
   };
 
@@ -204,21 +208,28 @@ function useTeams(user) {
 }
 
 /* ================= MatchKit ================= */
-function mkKey(teamId) {
-  return `matchkit:${teamId}`;
+async function apiLoadMatchKit(teamId) {
+  const r = await fetch(`/api/matchkit-get?teamId=${encodeURIComponent(teamId)}`);
+  if (!r.ok) throw new Error("Kunde inte läsa matchkläder");
+  return await r.json();
 }
-function loadMatchKit(teamId) {
-  return jget(mkKey(teamId), []);
+
+async function apiSaveMatchKit(teamId, items) {
+  const r = await fetch("/api/matchkit-set", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ teamId, items }),
+  });
+  if (!r.ok) throw new Error("Kunde inte spara matchkläder");
 }
-function saveMatchKit(teamId, items) {
-  jset(mkKey(teamId), items);
-}
-function moveMatchKit(fromTeamId, toTeamId, ids) {
-  const from = loadMatchKit(fromTeamId);
-  const to = loadMatchKit(toTeamId);
-  const moving = from.filter((i) => ids.includes(i.id));
-  saveMatchKit(fromTeamId, from.filter((i) => !ids.includes(i.id)));
-  saveMatchKit(toTeamId, [...to, ...moving]);
+async function moveMatchKit(fromTeamId, toTeamId, ids) {
+  const from = apiLoadMatchKit(fromTeamId);
+  const to = apiLoadMatchKit(toTeamId);
+
+  const moving = from.filter(i => ids.includes(i.id));
+
+  await apiSaveMatchKit(fromTeamId, from.filter(i => !ids.includes(i.id)));
+  await apiSaveMatchKit(toTeamId, [...to, ...moving]);
 }
 
 /* Import matchkit excel (expected columns: nummer, storlek, spelare optional) */
@@ -229,21 +240,22 @@ async function importMatchKitExcel(teamId, file, mode) {
   const rows = XLSX.utils.sheet_to_json(sheet);
 
   const items = rows
-    .map((r) => ({
+    .map(r => ({
       id: uuid(),
-      number: Number(r.nummer ?? r.Nummer ?? r.number ?? r.Number),
-      size: String(r.storlek ?? r.Storlek ?? r.size ?? r.Size ?? ""),
-      playerName: String(
-        r.spelare ?? r.Spelare ?? r.player ?? r.Player ?? ""
-      ).trim(),
+      number: Number(r.nummer ?? r.Nummer),
+      size: String(r.storlek ?? r.Storlek ?? ""),
+      playerName: String(r.spelare ?? "").trim(),
     }))
-    .filter((x) => Number.isFinite(x.number) && x.size);
+    .filter(x => Number.isFinite(x.number) && x.size);
 
-  const existing = loadMatchKit(teamId);
-  saveMatchKit(teamId, mode === "replace" ? items : [...existing, ...items]);
+  const existing = apiLoadMatchKit(teamId);
+  await apiSaveMatchKit(
+    teamId,
+    mode === "replace" ? items : [...existing, ...items]
+  );
+
   return items.length;
 }
-
 /* ================= Leader clothes: catalog, budget, issued, orders ================= */
 const catalogKey = "catalog:leaderclothes";
 function loadCatalog() {
@@ -303,10 +315,10 @@ function createOrder(teamId, user, items) {
   users
     .filter((u) => u.role === "admin")
     .forEach((a) =>
-      addNotification(a.id, `Ny beställning (${teamId}) från ${user.name}: ${total} kr`)
+      apiAddNotif(a.id, `Ny beställning (${teamId}) från ${user.name}: ${total} kr`)
     );
 
-  addNotification(user.id, "Beställning skickad ✅");
+  apiAddNotif(user.id, "Beställning skickad ✅");
   return order;
 }
 
@@ -351,7 +363,7 @@ function approveOrder(teamId, adminUser, orderId) {
     )
   );
 
-  addNotification(
+  apiAddNotif(
     order.createdByUserId,
     `Din beställning (${teamId}) godkänd ✅ (${order.totalCost} kr)`
   );
@@ -376,7 +388,7 @@ function rejectOrder(teamId, adminUser, orderId) {
         : o
     )
   );
-  addNotification(order.createdByUserId, `Din beställning (${teamId}) avslogs ❌`);
+  apiAddNotif(order.createdByUserId, `Din beställning (${teamId}) avslogs ❌`);
   return true;
 }
 
@@ -402,57 +414,42 @@ function adminIssueClothes(teamId, adminUser, leaderUserId, leaderName, name, si
   }
 
   if (leaderUserId) {
-    addNotification(leaderUserId, `Ledarkläder utlämnat (${teamId}): ${name} ✅`);
+    apiAddNotif(leaderUserId, `Ledarkläder utlämnat (${teamId}): ${name} ✅`);
   }
   return true;
 }
 
-/* ================= Team cash (history + chart) ================= */
-function cashKey(teamId) {
-  return `teamcash:${teamId}`;
-}
-function cashHistKey(teamId) {
-  return `teamcash-history:${teamId}`;
+/* ================= Team cash (Upstash KV via Vercel API) =================
+KV keys:
+- teamcash:<teamId>               (current)
+- teamcash-history:<teamId>       (array of {teamId, month, balance, importedAt})
+*/
+
+async function apiCashSnapshot(teamId) {
+  const r = await fetch(`/api/teamcash-snapshot?teamId=${encodeURIComponent(teamId)}`);
+  if (!r.ok) throw new Error("Kunde inte hämta lagkassa");
+  return await r.json(); // { cash, hist }
 }
 
-function loadCash(teamId) {
-  return jget(cashKey(teamId), {
-    teamId,
-    balance: null,
-    accountNumber: "",
-    updatedAt: null,
+async function apiCashUpsert({ teamId, balance, month, accountNumber }) {
+  const r = await fetch(`/api/teamcash-upsert`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ teamId, balance, month, accountNumber }),
   });
+  if (!r.ok) throw new Error("Kunde inte spara lagkassa");
+  return await r.json();
 }
 
-function loadCashHist(teamId) {
-  return jget(cashHistKey(teamId), []);
-}
-function saveCashWithHistory(teamId, balance, month, accountNumber) {
-  const now = new Date().toISOString();
-  const prev = loadCash(teamId);
-
-  jset(cashKey(teamId), {
-    teamId,
-    balance,
-    accountNumber: accountNumber ?? prev.accountNumber ?? "",
-    updatedAt: now,
-  });
-
-  const hist = loadCashHist(teamId).filter((h) => h.month !== month);
-  jset(cashHistKey(teamId), [
-    { teamId, month, balance, importedAt: now },
-    ...hist,
-  ]);
-}
-async function importCashExcel(file){
+async function importCashExcel(file) {
   const buf = await file.arrayBuffer();
-  const wb = XLSX.read(buf, { type:"array" });
+  const wb = XLSX.read(buf, { type: "array" });
   const sheet = wb.Sheets[wb.SheetNames[0]];
   const rows = XLSX.utils.sheet_to_json(sheet);
 
   let n = 0;
 
-  rows.forEach(r => {
+  for (const r of rows) {
     const teamId =
       r.teamId ?? r.Team ?? r.Lag ?? r.lag;
 
@@ -462,17 +459,20 @@ async function importCashExcel(file){
     const month =
       r.month ?? r.Month ?? r.månad ?? r.Månad;
 
-    if (!teamId || saldo === undefined || !month) return;
+    const accountNumber =
+      r.kontonummer ?? r.Kontonummer ?? r.accountNumber ?? r.AccountNumber ?? "";
 
-    saveCashWithHistory(
-      String(teamId).trim(),
-      Number(saldo),
-      String(month).trim()
-    );
+    if (!teamId || saldo === undefined || !month) continue;
+
+    await apiCashUpsert({
+      teamId: String(teamId).trim(),
+      balance: Number(saldo),
+      month: String(month).trim(),
+      accountNumber: String(accountNumber ?? "").trim(),
+    });
+
     n++;
-  });
-
-
+  }
 
   return n;
 }
@@ -654,10 +654,17 @@ function BottomNav({ route, nav, user }) {
 }
 
 /* ================= Page: Notifications ================= */
-function NotificationsPage({ user }) {
-  const [list, setList] = useState(() => jget(notifKey(user.id), []));
+async function NotificationsPage({ user }) {
+  const [list, setList] = useState([]);
+  const [loading, setLoading] = useState(true);
+
   useEffect(() => {
-    setList(jget(notifKey(user.id), []));
+    let alive = true;
+    setLoading(true);
+    apiGetNotifs(user.id)
+      .then((l) => alive && setList(l))
+      .finally(() => alive && setLoading(false));
+    return () => { alive = false; };
   }, [user.id]);
 
   const unread = list.filter((n) => !n.read).length;
@@ -669,7 +676,8 @@ function NotificationsPage({ user }) {
           <div className="card__title">Notiser</div>
           <Pill tone="neutral">{unread} olästa</Pill>
         </div>
-        {list.length === 0 && <div className="empty">Inga notiser</div>}
+        {loading && <div className="empty">Laddar…</div>}
+        {!loading && list.length === 0 && <div className="empty">Inga notiser</div>}
       </div>
 
       <div className="history">
@@ -677,21 +685,21 @@ function NotificationsPage({ user }) {
           <div key={n.id} className={`historyRow ${n.read ? "" : "card--selected"}`}>
             <div>
               <div className="historyRow__title">{n.message}</div>
-              <div className="historyRow__sub">{new Date(n.createdAt).toLocaleString()}</div>
+              <div className="historyRow__sub">
+                {new Date(n.createdAt).toLocaleString()}
+              </div>
             </div>
-            <div style={{ display: "grid", gap: 6 }}>
-              {!n.read && (
-                <button
-                  className="btn btn--ok"
-                  onClick={() => {
-                    markNotifRead(user.id, n.id);
-                    setList(jget(notifKey(user.id), []));
-                  }}
-                >
-                  Läst
-                </button>
-              )}
-            </div>
+            {!n.read && (
+              <button
+                className="btn btn--ok"
+                onClick={async () => {
+                  await apiMarkNotifRead(user.id, n.id);
+                  setList(await apiGetNotifs(user.id));
+                }}
+              >
+                Läst
+              </button>
+            )}
           </div>
         ))}
       </div>
@@ -700,39 +708,21 @@ function NotificationsPage({ user }) {
 }
 /* ================= HUVUDLAGER: Matchkläder (Warehouse) ================= */
 
-const warehouseKey = "matchkit:warehouse";
-function loadWarehouse() {
-  return jget(warehouseKey, []);
-}
-function saveWarehouse(items) {
-  jset(warehouseKey, items);
+async function apiLoadWarehouse() {
+  const r = await fetch("/api/warehouse-get");
+  if (!r.ok) throw new Error("Kunde inte läsa huvudlager");
+  return await r.json();
 }
 
-function normalizeSize(s) {
-  return String(s ?? "").trim();
+async function apiSaveWarehouse(items) {
+  const r = await fetch("/api/warehouse-set", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ items }),
+  });
+  if (!r.ok) throw new Error("Kunde inte spara huvudlager");
 }
 
-function normalizeNumber(n) {
-  const num = Number(n);
-  return Number.isFinite(num) ? num : null;
-}
-
-/** Gemensam parser för Excel (nummer, storlek, (ev spelare)) */
-async function parseMatchkitExcel(file) {
-  const buf = await file.arrayBuffer();
-  const wb = XLSX.read(buf, { type: "array" });
-  const sheet = wb.Sheets[wb.SheetNames[0]];
-  const rows = XLSX.utils.sheet_to_json(sheet);
-
-  return rows
-    .map((r) => {
-      const number = normalizeNumber(r.nummer ?? r.Nummer ?? r.number ?? r.Number);
-      const size = normalizeSize(r.storlek ?? r.Storlek ?? r.size ?? r.Size ?? "");
-      const playerName = String(r.spelare ?? r.Spelare ?? r.player ?? r.Player ?? "").trim();
-      return { number, size, playerName };
-    })
-    .filter((x) => x.number !== null && x.size);
-}
 
 /** Import till huvudlager */
 async function importWarehouseExcel(file, mode) {
@@ -747,16 +737,16 @@ async function importWarehouseExcel(file, mode) {
     createdAt: new Date().toISOString(),
   }));
 
-  const existing = loadWarehouse();
+  const existing = apiloadWarehouse();
   const next = mode === "replace" ? incoming : [...existing, ...incoming];
-  saveWarehouse(next);
+  await apiSaveWarehouse(next);
 
   return incoming.length;
 }
 
-function assignWarehouseItemToTeam(itemId, teamId) {
+async function assignWarehouseItemToTeam(itemId, teamId) {
   // 1. Hämta huvudlager
-  const warehouse = loadWarehouse();
+  const warehouse = apiloadWarehouse();
   const item = warehouse.find((x) => x.id === itemId);
 
   if (!item || item.status !== "available") {
@@ -764,14 +754,14 @@ function assignWarehouseItemToTeam(itemId, teamId) {
   }
 
   // 2. Lägg till tröjan i lagets matchkläder
-  const teamItems = loadMatchKit(teamId);
+  const teamItems = apiLoadMatchKit(teamId);
   const teamItem = {
     id: item.id,                 // SAMMA id
     number: item.number,
     size: item.size,
     playerName: "",              // fylls i av ledare senare
   };
-  saveMatchKit(teamId, [teamItem, ...teamItems]);
+  apiSaveMatchKit(teamId, [teamItem, ...teamItems]);
 
   // 3. Uppdatera huvudlagerstatus
   const updatedWarehouse = warehouse.map((x) =>
@@ -780,23 +770,23 @@ function assignWarehouseItemToTeam(itemId, teamId) {
       : x
   );
 
-  saveWarehouse(updatedWarehouse);
+  await apiSaveWarehouse(updatedWarehouse);
 }
 
-function returnWarehouseItemFromTeam(itemId, teamId) {
+async function returnWarehouseItemFromTeam(itemId, teamId) {
   // 1. Ta bort tröjan från lagets matchkläder
-  const teamItems = loadMatchKit(teamId);
+  const teamItems = apiLoadMatchKit(teamId);
   const remaining = teamItems.filter((x) => x.id !== itemId);
-  saveMatchKit(teamId, remaining);
+ apiSaveMatchKit(teamId, remaining);
 
   // 2. Uppdatera huvudlager: gör tröjan tillgänglig igen
-  const warehouse = loadWarehouse();
+  const warehouse = apiloadWarehouse();
   const updated = warehouse.map((x) =>
     x.id === itemId
       ? { ...x, status: "available", teamId: null }
       : x
   );
-  saveWarehouse(updated);
+  await apiSaveWarehouse(updated);
 }
 
 /** UI: Admin‑vy för huvudlager */
@@ -810,7 +800,15 @@ function WarehouseMatchkitPage({ user }) {
     );
   }
 
-  const [items, setItems] = useState(() => loadWarehouse());
+  const [items, setItems] = useState([]);
+
+useEffect(() => {
+  apiLoadWarehouse().then(setItems);
+}, []);
+
+useEffect(() => {
+    apiLoadWarehouse().then(setItems);
+  }, []);
   const [importMode, setImportMode] = useState("append");
 const [assigningId, setAssigningId] = useState(null);
 const [assignTeamId, setAssignTeamId] = useState("");
@@ -821,9 +819,11 @@ const [assignTeamId, setAssignTeamId] = useState("");
   const [qSize, setQSize] = useState("all");
 
   // uppdatera state om localStorage ändras via andra actions
-  const reload = () => setItems(loadWarehouse());
-
-  const sizes = useMemo(() => {
+  const reload = async () => {
+    const w = await apiLoadWarehouse();
+    setItems(w);
+  };
+const sizes = useMemo(() => {
     const set = new Set(items.map((i) => i.size).filter(Boolean));
     return Array.from(set).sort((a, b) => a.localeCompare(b, "sv"));
   }, [items]);
@@ -840,7 +840,7 @@ const [assignTeamId, setAssignTeamId] = useState("");
   const totalCount = items.length;
   const availableCount = items.filter((i) => i.status === "available").length;
 
-  const addManual = () => {
+  const addManual = async () => {
     const number = normalizeNumber(prompt("Tröjnummer?"));
     const size = normalizeSize(prompt("Storlek (t.ex. 152, S, M)?") || "");
     if (number === null || !size) return;
@@ -856,19 +856,19 @@ const [assignTeamId, setAssignTeamId] = useState("");
       },
       ...items,
     ];
-    saveWarehouse(next);
+    await apiSaveWarehouse(next);
     setItems(next);
   };
 
-  const removeOne = (id) => {
+  const removeOne = async (id) => {
     const next = items.filter((x) => x.id !== id);
-    saveWarehouse(next);
+    await apiSaveWarehouse(next);
     setItems(next);
   };
 
-  const clearAll = () => {
+  const clearAll = async () => {
     if (!confirm("Rensa hela huvudlagret?")) return;
-    saveWarehouse([]);
+    await apiSaveWarehouse([]);
     setItems([]);
   };
 
@@ -943,7 +943,7 @@ const [assignTeamId, setAssignTeamId] = useState("");
                 if (!e.target.files?.[0]) return;
                 const n = await importWarehouseExcel(e.target.files[0], importMode);
                 reload();
-                addNotification(user.id, `Importerade ${n} rader till huvudlager ✅`);
+                apiAddNotif(user.id, `Importerade ${n} rader till huvudlager ✅`);
                 alert(`Importerade ${n} rader ✅`);
               }}
             />
@@ -1056,14 +1056,25 @@ const [assignTeamId, setAssignTeamId] = useState("");
 }
 /* ================= Page: Matchkit ================= */
 function MatchKitPage({ user, teamId, teamsVisible }) {
-  const [items, setItems] = useState(() => loadMatchKit(teamId));
+  const [items, setItems] = useState([]);
+
+
+useEffect(() => {
+  apiLoadMatchKit(teamId).then(setItems);
+}, [teamId]);
+
+useEffect(() => {
+  apiLoadMatchKit(teamId).then(setItems);
+  setSelected([]);
+}, [teamId]);
+
   const [importMode, setImportMode] = useState("replace");
   const [moveFrom, setMoveFrom] = useState(teamId);
   const [moveTo, setMoveTo] = useState(teamsVisible.find((t) => t.id !== teamId)?.id ?? teamId);
   const [selected, setSelected] = useState([]);
 
   useEffect(() => {
-    setItems(loadMatchKit(teamId));
+    apiLoadMatchKit(teamId).then(setItems);
     setSelected([]);
   }, [teamId]);
 
@@ -1073,27 +1084,29 @@ function MatchKitPage({ user, teamId, teamsVisible }) {
   const toggle = (id) =>
     setSelected((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
 
-  const addItem = () => {
+  const addItem = async () => {
     if (!isAdmin) return;
     const number = Number(prompt("Tröjnummer?"));
     const size = prompt("Storlek (t.ex. 152, S, M)?") || "";
     if (!Number.isFinite(number) || !size) return;
     const next = [...items, { id: uuid(), number, size, playerName: "" }];
     setItems(next);
-    saveMatchKit(teamId, next);
+    await apiSaveMatchKit(teamId, next);
   };
 
-  const updateItem = (id, patch) => {
-    const next = items.map((i) => (i.id === id ? { ...i, ...patch } : i));
-    setItems(next);
-    saveMatchKit(teamId, next);
-  };
 
-  const removeItem = (id) => {
+const updateItem = async (id, patch) => {
+  const next = items.map((i) => (i.id === id ? { ...i, ...patch } : i));
+  setItems(next);
+  await apiSaveMatchKit(teamId, next);
+};
+
+
+  const removeItem = async (id) => {
     if (!isAdmin) return;
     const next = items.filter((i) => i.id !== id);
     setItems(next);
-    saveMatchKit(teamId, next);
+    await apiSaveMatchKit(teamId, next);
   };
 
   return (
@@ -1162,7 +1175,7 @@ function MatchKitPage({ user, teamId, teamsVisible }) {
     onClick={() => {
       if (!confirm("Returnera tröjan till huvudlager?")) return;
       returnWarehouseItemFromTeam(it.id, teamId);
-      setItems(loadMatchKit(teamId)); // uppdatera vyn
+      setItems(apiLoadMatchKit(teamId)); // uppdatera vyn
     }}
   >
     Returnera till lager
@@ -1211,9 +1224,9 @@ function MatchKitPage({ user, teamId, teamsVisible }) {
               disabled={selected.length === 0}
               onClick={() => {
                 moveMatchKit(moveFrom, moveTo, selected);
-                setItems(loadMatchKit(teamId));
+                setItems(apiLoadMatchKit(teamId));
                 setSelected([]);
-                addNotification(user.id, "Matchkläder flyttade ✅");
+                apiAddNotif(user.id, "Matchkläder flyttade ✅");
               }}
             >
               Flytta markerade
@@ -1241,8 +1254,8 @@ function MatchKitPage({ user, teamId, teamsVisible }) {
               onChange={async (e) => {
                 if (!e.target.files?.[0]) return;
                 const n = await importMatchKitExcel(teamId, e.target.files[0], importMode);
-                setItems(loadMatchKit(teamId));
-                addNotification(user.id, `Importerade ${n} tröjor ✅`);
+                setItems(apiLoadMatchKit(teamId));
+                apiAddNotif(user.id, `Importerade ${n} tröjor ✅`);
               }}
             />
           </>
@@ -1479,7 +1492,7 @@ function AdminInner({ user, teamId }) {
                 teamIds: [teamId],
               };
               jset("users", [...users, u]);
-              addNotification(user.id, "Användare skapad ✅");
+              apiAddNotif(user.id, "Användare skapad ✅");
               setNewUserName("");
               setNewUserPin("");
               alert("Skapad ✅ (logga ut/in för att se i listor)");
@@ -1509,7 +1522,7 @@ function AdminInner({ user, teamId }) {
             const t = Number(budgetTotal);
             if (!Number.isFinite(t) || t < 0) return;
             saveBudget(teamId, { ...budget, total: t });
-            addNotification(user.id, "Budget uppdaterad ✅");
+            apiAddNotif(user.id, "Budget uppdaterad ✅");
             alert("Sparad ✅");
           }}
         >
@@ -1643,27 +1656,83 @@ function AdminInner({ user, teamId }) {
   );
 }
 
-/* ================= Page: Teamcash ================= */
+/* ================= Page: Teamcash (Upstash) ================= */
 function TeamCashPage({ user, teamId }) {
-  const cash = loadCash(teamId);
-  const hist = loadCashHist(teamId).slice().sort((a, b) => a.month.localeCompare(b.month));
-  const chartData = hist.map((h) => ({ month: h.month, balance: h.balance }));
-  const reversed = hist.slice().reverse();
+  const [cash, setCash] = useState(null);
+  const [hist, setHist] = useState([]);
+  const [loading, setLoading] = useState(true);
+
+  // (valfritt) admin kan editera kontonummer direkt
+  const [accountInput, setAccountInput] = useState("");
+
+  useEffect(() => {
+    let alive = true;
+    setLoading(true);
+
+    apiCashSnapshot(teamId)
+      .then(({ cash, hist }) => {
+        if (!alive) return;
+        setCash(cash);
+        setHist(Array.isArray(hist) ? hist : []);
+        setAccountInput(cash?.accountNumber ?? "");
+      })
+      .catch((e) => {
+        console.error(e);
+        if (!alive) return;
+        setCash(null);
+        setHist([]);
+      })
+      .finally(() => alive && setLoading(false));
+
+    return () => {
+      alive = false;
+    };
+  }, [teamId]);
+
+  const chartData = useMemo(() => {
+    const sorted = [...hist].sort((a, b) => String(a.month).localeCompare(String(b.month)));
+    return sorted.map((h) => ({ month: h.month, balance: h.balance }));
+  }, [hist]);
+
+  const reversed = useMemo(() => {
+    const sorted = [...hist].sort((a, b) => String(a.month).localeCompare(String(b.month)));
+    return sorted.slice().reverse();
+  }, [hist]);
+
+  async function saveAccountNumber() {
+    // Uppdatera endast kontonummer (behåll saldo)
+    const balance = cash?.balance ?? null;
+    await apiCashUpsert({
+      teamId,
+      balance,
+      month: null,
+      accountNumber: accountInput,
+    });
+    const snap = await apiCashSnapshot(teamId);
+    setCash(snap.cash);
+    setHist(snap.hist);
+  }
 
   return (
     <div>
       <div className="summaryCard">
         <div className="summaryTitle">Lagkassa</div>
-        <div className="summaryValue">{cash?.balance ?? "—"} kr</div>
-        <div className="summarySub">
-          {cash?.updatedAt ? "Uppdaterad " + new Date(cash.updatedAt).toLocaleDateString() : "Ingen import ännu"}
-        </div>
-{cash?.accountNumber && (
-  <div className="summarySub">
-    Kontonummer: <strong>{cash.accountNumber}</strong>
-  </div>
-)}
 
+        <div className="summaryValue">
+          {loading ? "…" : (cash?.balance ?? "—")} kr
+        </div>
+
+        <div className="summarySub">
+          {cash?.updatedAt
+            ? "Uppdaterad " + new Date(cash.updatedAt).toLocaleDateString()
+            : "Ingen import ännu"}
+        </div>
+
+        {cash?.accountNumber && (
+          <div className="summarySub">
+            Kontonummer: <strong>{cash.accountNumber}</strong>
+          </div>
+        )}
       </div>
 
       <div className="card">
@@ -1697,43 +1766,74 @@ function TeamCashPage({ user, teamId }) {
         {reversed.map((h, idx) => {
           const prev = reversed[idx + 1];
           const delta = prev ? h.balance - prev.balance : 0;
+
           return (
             <div key={h.month} className="historyRow">
               <div>
-                <div className="historyRow__title">{h.month}</div>
-                <div className="historyRow__sub">Import: {new Date(h.importedAt).toLocaleDateString()}</div>
+                <div className="historyRow__title">{String(h.month)}</div>
+                <div className="historyRow__sub">
+                  Import: {h.importedAt ? new Date(h.importedAt).toLocaleDateString() : "—"}
+                </div>
               </div>
-              <div className={`historyRow__delta ${delta >= 0 ? "pos" : "neg"}`}>{h.balance} kr</div>
+
+              <div className={`historyRow__delta ${delta >= 0 ? "pos" : "neg"}`}>
+                {h.balance} kr
+              </div>
             </div>
           );
         })}
       </div>
 
       {user.role === "admin" && (
-        <div className="card" style={{ marginTop: 12 }}>
-          <div className="card__title">Importera (Excel)</div>
-          <div className="meta">
-            <div className="meta__row"><span>Format</span><span className="meta__value">teamId, saldo, month</span></div>
+        <>
+          <div className="card" style={{ marginTop: 12 }}>
+            <div className="card__title">Kontonummer</div>
+            <div className="formGrid" style={{ marginTop: 10 }}>
+              <div className="field">
+                <span>Kontonummer</span>
+                <input
+                  value={accountInput}
+                  onChange={(e) => setAccountInput(e.target.value)}
+                  placeholder="t.ex. 8134-9-123456"
+                />
+              </div>
+              <button className="btn btn--ok" onClick={saveAccountNumber}>
+                Spara kontonummer
+              </button>
+            </div>
           </div>
-          <input
-            type="file"
-            accept=".xlsx,.xls"
-            onChange={async (e) => {
-              if (!e.target.files?.[0]) return;
-              const n = await importCashExcel(e.target.files[0]);
-              addNotification(user.id, `Importerade ${n} rader ✅`);
-              alert("Importerad ✅");
-              window.location.reload();
-            }}
-          />
-        </div>
+
+          <div className="card" style={{ marginTop: 12 }}>
+            <div className="card__title">Importera (Excel)</div>
+            <div className="meta">
+              <div className="meta__row">
+                <span>Format</span>
+                <span className="meta__value">teamId/Lag, saldo/Saldo, month/Månad, kontonummer (valfri)</span>
+              </div>
+            </div>
+            <input
+              type="file"
+              accept=".xlsx,.xls"
+              onChange={async (e) => {
+                if (!e.target.files?.[0]) return;
+                const n = await importCashExcel(e.target.files[0]);
+                apiAddNotif(user.id, `Importerade ${n} rader ✅`);
+                alert(`Importerade ${n} rader ✅`);
+                const snap = await apiCashSnapshot(teamId);
+                setCash(snap.cash);
+                setHist(snap.hist);
+              }}
+            />
+          </div>
+        </>
       )}
     </div>
   );
 }
 
-/* ================= Page: Reports ================= */
-function ReportsPage({ user, teamId, teamsAll }) {
+/* ================= Page: Reports (Upstash for lagkassa) ================= */
+function ReportsPage(props) {
+  const { user } = props;
   if (user.role !== "admin") {
     return (
       <div className="card">
@@ -1742,22 +1842,34 @@ function ReportsPage({ user, teamId, teamsAll }) {
       </div>
     );
   }
+  return <ReportsInner {...props} />;
+}
 
+function ReportsInner({ user, teamId, teamsAll }) {
   const team = teamsAll.find((t) => t.id === teamId);
 
-  
-const cash = loadCash(teamId);
+  const [cash, setCash] = useState(null);
+  const [cashHist, setCashHist] = useState([]);
 
-const cashHist = loadCashHist(teamId);
-const cashRows = cashHist.map((h) => ({
-  Lag: team?.name ?? teamId,
-  Kontonummer: cash?.accountNumber ?? "",
-  Månad: h.month,
-  Saldo: h.balance,
-  Importerad: new Date(h.importedAt).toLocaleDateString(),
-}));
+  useEffect(() => {
+    let alive = true;
+    apiCashSnapshot(teamId).then(({ cash, hist }) => {
+      if (!alive) return;
+      setCash(cash);
+      setCashHist(Array.isArray(hist) ? hist : []);
+    });
+    return () => { alive = false; };
+  }, [teamId]);
 
+  const cashRows = cashHist.map((h) => ({
+    Lag: team?.name ?? teamId,
+    Kontonummer: cash?.accountNumber ?? "",
+    Månad: String(h.month), // text så Excel inte gör serienummer
+    Saldo: h.balance,
+    Importerad: h.importedAt ? new Date(h.importedAt).toLocaleDateString() : "",
+  }));
 
+  // övriga exports ligger kvar i localStorage tills vidare:
   const issued = loadIssued(teamId);
   const issuedRows = issued.map((i) => ({
     Lag: team?.name ?? teamId,
@@ -1779,8 +1891,9 @@ const cashRows = cashHist.map((h) => ({
     Status: o.status,
   }));
 
-  const matchKit = loadMatchKit(teamId);
-  const mkRows = matchKit.map((m) => ({
+  const matchKit = apiLoadMatchKit(teamId);
+  const safeMatchKit = Array.isArray(matchKit) ? matchKit : [];
+  const mkRows = safeMatchKit.map((m) => ({
     Lag: team?.name ?? teamId,
     Nummer: m.number,
     Storlek: m.size,
@@ -1796,19 +1909,41 @@ const cashRows = cashHist.map((h) => ({
         </div>
 
         <div className="btnRow">
-          <button className="btn btn--primary" onClick={() => exportXlsx("Lagkassa", cashRows, `lagkassa-${teamId}-${new Date().toISOString().slice(0, 10)}.xlsx`)}>
+          <button
+            className="btn btn--primary"
+            onClick={() =>
+              exportXlsx("Lagkassa", cashRows, `lagkassa-${teamId}-${new Date().toISOString().slice(0, 10)}.xlsx`)
+            }
+          >
             Export Lagkassa
           </button>
-          <button className="btn btn--primary" onClick={() => exportXlsx("Ledarkläder", issuedRows, `ledarklader-${teamId}-${new Date().toISOString().slice(0, 10)}.xlsx`)}>
+
+          <button
+            className="btn btn--primary"
+            onClick={() =>
+              exportXlsx("Ledarkläder", issuedRows, `ledarklader-${teamId}-${new Date().toISOString().slice(0, 10)}.xlsx`)
+            }
+          >
             Export Ledarkläder
           </button>
         </div>
 
         <div className="btnRow">
-          <button className="btn btn--ghost" onClick={() => exportXlsx("Orders", orderRows, `orders-${teamId}-${new Date().toISOString().slice(0, 10)}.xlsx`)}>
+          <button
+            className="btn btn--ghost"
+            onClick={() =>
+              exportXlsx("Orders", orderRows, `orders-${teamId}-${new Date().toISOString().slice(0, 10)}.xlsx`)
+            }
+          >
             Export Beställningar
           </button>
-          <button className="btn btn--ghost" onClick={() => exportXlsx("Matchkläder", mkRows, `matchklader-${teamId}-${new Date().toISOString().slice(0, 10)}.xlsx`)}>
+
+          <button
+            className="btn btn--ghost"
+            onClick={() =>
+              exportXlsx("Matchkläder", mkRows, `matchklader-${teamId}-${new Date().toISOString().slice(0, 10)}.xlsx`)
+            }
+          >
             Export Matchkläder
           </button>
         </div>
@@ -1816,15 +1951,17 @@ const cashRows = cashHist.map((h) => ({
     </div>
   );
 }
-
 /* ================= App root ================= */
 function AuthedApp({ auth, route, nav }) {
   const { visibleTeams, activeTeamId, setActiveTeamId } = useTeams(auth.user);
 
-  const unreadCount = useMemo(() => {
-    const list = jget(notifKey(auth.user.id), []);
-    return list.filter((n) => !n.read).length;
-  }, [auth.user.id, route]);
+const [unreadCount, setUnreadCount] = useState(0);
+
+useEffect(() => {
+  apiGetNotifs(auth.user.id).then((list) => {
+    setUnreadCount(list.filter((n) => !n.read).length);
+  });
+}, [auth.user.id, route]);
 
   const renderPage = () => {
 if (route === "/warehouse") return <WarehouseMatchkitPage user={auth.user} />;    
@@ -1914,5 +2051,5 @@ export default function App() {
     return <Login users={auth.users} onLogin={auth.login} />;
   }
 
-  return <AuthedApp auth={auth} route={route} nav={nav} />;
-}
+  return <AuthedApp auth={auth} route={route} nav={nav} />
+;}
