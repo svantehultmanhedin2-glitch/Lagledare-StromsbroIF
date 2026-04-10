@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import * as XLSX from "xlsx";
 import {
   ResponsiveContainer,
@@ -9,6 +9,22 @@ import {
   YAxis,
   Tooltip,
 } from "recharts";
+
+// ===== API: HUVUDLAGER =====
+async function apiLoadWarehouse() {
+  const r = await fetch("/api/warehouse-get");
+  if (!r.ok) throw new Error("Kunde inte läsa huvudlager");
+  return await r.json();
+}
+
+async function apiSaveWarehouse(items) {
+  const r = await fetch("/api/warehouse-set", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ items }),
+  });
+  if (!r.ok) throw new Error("Kunde inte spara huvudlager");
+}
 
 /* ================= Utilities ================= */
 const uuid = () =>
@@ -41,7 +57,14 @@ function hashPin(pin) {
   }
   return (h >>> 0).toString(16);
 }
+async function parseMatchkitExcel(file) {
+  const buf = await file.arrayBuffer();
+  const wb = XLSX.read(buf, { type: "array" });
+  const sheet = wb.Sheets[wb.SheetNames[0]];
+  const rows = XLSX.utils.sheet_to_json(sheet);
 
+  return rows;
+}
 /* ================= Default data ================= */
 const DEFAULT_TEAMS = [
   { id: "A-lag Dam", name: "A-lag Dam" },
@@ -233,29 +256,29 @@ async function moveMatchKit(fromTeamId, toTeamId, ids) {
 }
 
 /* Import matchkit excel (expected columns: nummer, storlek, spelare optional) */
-async function importMatchKitExcel(teamId, file, mode) {
-  const buf = await file.arrayBuffer();
-  const wb = XLSX.read(buf, { type: "array" });
-  const sheet = wb.Sheets[wb.SheetNames[0]];
-  const rows = XLSX.utils.sheet_to_json(sheet);
+const importMatchKitExcel = async (file, mode) => {
+  const parsed = await parseMatchkitExcel(file);
 
-  const items = rows
-    .map(r => ({
-      id: uuid(),
-      number: Number(r.nummer ?? r.Nummer),
-      size: String(r.storlek ?? r.Storlek ?? ""),
-      playerName: String(r.spelare ?? "").trim(),
-    }))
-    .filter(x => Number.isFinite(x.number) && x.size);
+  const incoming = parsed.map((x) => ({
+    id: uuid(),
+    number: x.number,
+    size: x.size,
+    playerName: x.playerName || "",
+  }));
 
-  const existing = apiLoadMatchKit(teamId);
-  await apiSaveMatchKit(
-    teamId,
-    mode === "replace" ? items : [...existing, ...items]
-  );
+  const next =
+    mode === "replace"
+      ? incoming
+      : [...items, ...incoming];
 
-  return items.length;
-}
+  // ✅ uppdatera UI direkt
+  setItems(next);
+
+  // ✅ spara till backend (Upstash)
+  await apiSaveMatchKit(teamId, next);
+
+  return incoming.length;
+};
 /* ================= Leader clothes: catalog, budget, issued, orders ================= */
 const catalogKey = "catalog:leaderclothes";
 function loadCatalog() {
@@ -309,6 +332,13 @@ function createOrder(teamId, user, items) {
   };
   const list = loadOrders(teamId);
   saveOrders(teamId, [...list, order]);
+
+async function adminRemoveLeaderClothesItem(teamId, itemId) {
+  const orders = loadOrders(teamId);
+  const next = orders.filter(o => o.id !== itemId);
+  saveOrders(teamId, next);
+  return next;
+}
 
   // notify all admins
   const users = jget("users", []);
@@ -485,6 +515,44 @@ function exportXlsx(sheetName, rows, filename) {
   XLSX.writeFile(wb, filename);
 }
 
+async function buildReportForAllTeams() {
+  const rows = [];
+
+  for (const team of DEFAULT_TEAMS) {
+    const teamId = team.id;
+
+    const orders = loadOrders(teamId);
+    const matchKit = await apiLoadMatchKit(teamId);
+
+    // Exempel: ledarkläder via orders
+    orders
+      .filter(o => o.status === "approved")
+      .forEach(o => {
+        o.items.forEach(item => {
+          rows.push({
+            lag: teamId,
+            produkt: item.name,
+            storlek: item.size,
+            pris: item.price,
+            typ: "Ledarkläder",
+          });
+        });
+      });
+
+    matchKit.forEach(mk => {
+      rows.push({
+        lag: teamId,
+        nummer: mk.number,
+        storlek: mk.size,
+        spelare: mk.playerName || "",
+        typ: "Matchställ",
+      });
+    });
+  }
+
+  return rows;
+}
+
 /* ================= UI helpers ================= */
 function Pill({ tone, children }) {
   return <span className={`pill pill--${tone}`}>{children}</span>;
@@ -654,7 +722,7 @@ function BottomNav({ route, nav, user }) {
 }
 
 /* ================= Page: Notifications ================= */
-async function NotificationsPage({ user }) {
+function NotificationsPage({ user }) {
   const [list, setList] = useState([]);
   const [loading, setLoading] = useState(true);
 
@@ -708,89 +776,14 @@ async function NotificationsPage({ user }) {
 }
 /* ================= HUVUDLAGER: Matchkläder (Warehouse) ================= */
 
-async function apiLoadWarehouse() {
-  const r = await fetch("/api/warehouse-get");
-  if (!r.ok) throw new Error("Kunde inte läsa huvudlager");
-  return await r.json();
-}
 
-async function apiSaveWarehouse(items) {
-  const r = await fetch("/api/warehouse-set", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ items }),
-  });
-  if (!r.ok) throw new Error("Kunde inte spara huvudlager");
-}
 
 
 /** Import till huvudlager */
-async function importWarehouseExcel(file, mode) {
-  const parsed = await parseMatchkitExcel(file);
-
-  const incoming = parsed.map((x) => ({
-    id: uuid(),
-    number: x.number,
-    size: x.size,
-    status: "available", // available | assigned (för framtiden)
-    note: "",
-    createdAt: new Date().toISOString(),
-  }));
-
-  const existing = apiloadWarehouse();
-  const next = mode === "replace" ? incoming : [...existing, ...incoming];
-  await apiSaveWarehouse(next);
-
-  return incoming.length;
-}
-
-async function assignWarehouseItemToTeam(itemId, teamId) {
-  // 1. Hämta huvudlager
-  const warehouse = apiloadWarehouse();
-  const item = warehouse.find((x) => x.id === itemId);
-
-  if (!item || item.status !== "available") {
-    throw new Error("Tröjan är inte tillgänglig");
-  }
-
-  // 2. Lägg till tröjan i lagets matchkläder
-  const teamItems = apiLoadMatchKit(teamId);
-  const teamItem = {
-    id: item.id,                 // SAMMA id
-    number: item.number,
-    size: item.size,
-    playerName: "",              // fylls i av ledare senare
-  };
-  apiSaveMatchKit(teamId, [teamItem, ...teamItems]);
-
-  // 3. Uppdatera huvudlagerstatus
-  const updatedWarehouse = warehouse.map((x) =>
-    x.id === itemId
-      ? { ...x, status: "assigned", teamId }
-      : x
-  );
-
-  await apiSaveWarehouse(updatedWarehouse);
-}
-
-async function returnWarehouseItemFromTeam(itemId, teamId) {
-  // 1. Ta bort tröjan från lagets matchkläder
-  const teamItems = apiLoadMatchKit(teamId);
-  const remaining = teamItems.filter((x) => x.id !== itemId);
- apiSaveMatchKit(teamId, remaining);
-
-  // 2. Uppdatera huvudlager: gör tröjan tillgänglig igen
-  const warehouse = apiloadWarehouse();
-  const updated = warehouse.map((x) =>
-    x.id === itemId
-      ? { ...x, status: "available", teamId: null }
-      : x
-  );
-  await apiSaveWarehouse(updated);
-}
 
 /** UI: Admin‑vy för huvudlager */
-function WarehouseMatchkitPage({ user }) {
+function WarehouseMatchkitPage({ user }){
+const fileRef = useRef(null); 
   if (user.role !== "admin") {
     return (
       <div className="card">
@@ -802,9 +795,91 @@ function WarehouseMatchkitPage({ user }) {
 
   const [items, setItems] = useState([]);
 
-useEffect(() => {
-  apiLoadWarehouse().then(setItems);
-}, []);
+  const importWarehouseExcel = async (file, mode) => {
+  const parsed = await parseMatchkitExcel(file);
+
+  const incoming = parsed
+    .map((row) => ({
+      id: uuid(),
+      number: Number(row.Nummer ?? row.number),
+      size: String(row.Storlek ?? row.size),
+      status: "available",
+      note: "",
+      createdAt: new Date().toISOString(),
+    }))
+    .filter((x) => Number.isFinite(x.number) && x.size);
+
+  if (incoming.length === 0) {
+    alert("Filen innehåller inga giltiga rader");
+    return 0;
+  }
+
+  const next =
+    mode === "replace"
+      ? incoming
+      : [...items, ...incoming];
+
+  // ✅ UI uppdateras direkt
+  setItems(next);
+
+  // ✅ backend sparas
+  await apiSaveWarehouse(next);
+
+  return incoming.length;
+};
+const assignWarehouseItemToTeam = async (itemId, teamId) => {
+  // 1. hämta huvudlager
+  const warehouse = await apiLoadWarehouse();
+  const item = warehouse.find((x) => x.id === itemId);
+
+  if (!item || item.status !== "available") {
+    alert("Tröjan är inte tillgänglig");
+    return;
+  }
+
+  // 2. hämta lagets matchkläder
+  const teamItems = await apiLoadMatchKit(teamId);
+
+  const teamItem = {
+    id: item.id,        // samma id
+    number: item.number,
+    size: item.size,
+    playerName: "",
+  };
+
+  // 3. spara till lagets matchkit
+  await apiSaveMatchKit(teamId, [teamItem, ...teamItems]);
+
+  // 4. uppdatera huvudlager
+  const updatedWarehouse = warehouse.map((x) =>
+    x.id === itemId
+      ? { ...x, status: "assigned", teamId }
+      : x
+  );
+
+  await apiSaveWarehouse(updatedWarehouse);
+
+  // ✅ 5. uppdatera UI direkt
+  setItems(updatedWarehouse);
+};
+``
+
+async function returnWarehouseItemFromTeam(itemId, teamId) {
+  // 1. Ta bort tröjan från lagets matchkläder
+  const teamItems = apiLoadMatchKit(teamId);
+  const remaining = teamItems.filter((x) => x.id !== itemId);
+ apiSaveMatchKit(teamId, remaining);
+
+  // 2. Uppdatera huvudlager: gör tröjan tillgänglig igen
+  const warehouse = apiLoadWarehouse();
+  const updated = warehouse.map((x) =>
+    x.id === itemId
+      ? { ...x, status: "available", teamId: null }
+      : x
+  );
+  await apiSaveWarehouse(updated);
+}
+
 
 useEffect(() => {
     apiLoadWarehouse().then(setItems);
@@ -936,17 +1011,34 @@ const sizes = useMemo(() => {
 
           <div className="field">
             <span>Fil</span>
+            
+<button
+  className="btn btn--primary"
+  onClick={() => fileRef.current.click()}
+>
+  Importera huvudlager
+</button>
+
             <input
-              type="file"
-              accept=".xlsx,.xls"
-              onChange={async (e) => {
-                if (!e.target.files?.[0]) return;
-                const n = await importWarehouseExcel(e.target.files[0], importMode);
-                reload();
-                apiAddNotif(user.id, `Importerade ${n} rader till huvudlager ✅`);
-                alert(`Importerade ${n} rader ✅`);
-              }}
-            />
+  ref={fileRef}
+  type="file"
+  accept=".xlsx,.xls"
+  style={{ display: "none" }}
+  onChange={async (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    try {
+      const count = await importWarehouseExcel(file, "append");
+      alert(`${count} plagg importerade ✅`);
+    } catch (err) {
+      console.error(err);
+      alert("Importen misslyckades ❌");
+    } finally {
+      e.target.value = "";
+    }
+  }}
+/>
           </div>
         </div>
       </div>
@@ -1013,9 +1105,9 @@ const sizes = useMemo(() => {
       <button
         className="btn btn--ok"
         disabled={!assignTeamId}
-        onClick={() => {
+        onClick={async() => {
           try {
-            assignWarehouseItemToTeam(i.id, assignTeamId);
+            await assignWarehouseItemToTeam(i.id, assignTeamId);
             setAssigningId(null);
             setAssignTeamId("");
             reload();
@@ -1298,12 +1390,34 @@ function LeaderClothesPage({ user, teamId, nav }) {
             <div>
               <div className="historyRow__title">
                 {i.leaderName} · {i.name} {i.quantity > 1 ? `x${i.quantity}` : ""}
+                
               </div>
               <div className="historyRow__sub">
                 {i.dateIssued} · {i.source === "order" ? "Beställning" : "Manuell"}
               </div>
             </div>
             <div className="historyRow__delta neg">{i.cost} kr</div>
+            {user.role === "admin" && (
+  <button
+    className="btn btn--danger"
+    onClick={async () => {
+      if (!confirm("Ta bort ledarklädesplagg från laget?")) return;
+
+      try {
+        const updated = await adminRemoveLeaderClothesItem(
+          teamId,
+          item.id
+        );
+        setOrders(updated);   // ✅ uppdatera UI direkt
+      } catch (e) {
+        alert("Kunde inte ta bort ledarklädesplagg");
+        console.error(e);
+      }
+    }}
+  >
+    Ta bort från lag
+  </button>
+)}
           </div>
         ))}
       </div>
@@ -1417,6 +1531,7 @@ function OrderPage({ user, teamId }) {
 /* ================= Page: Admin (hook-safe gate) ================= */
 function AdminPage(props) {
   const { user } = props;
+
   if (user.role !== "admin") {
     return (
       <div className="card">
@@ -1425,237 +1540,290 @@ function AdminPage(props) {
       </div>
     );
   }
+
   return <AdminInner {...props} />;
 }
 
 function AdminInner({ user, teamId }) {
+  /* ===================== DATA ===================== */
   const users = jget("users", []);
   const teamUsers = users.filter((u) => u.teamIds?.includes(teamId));
   const leaders = teamUsers.filter((u) => u.role === "leader");
 
-  const catalog = loadCatalog();
-  const budget = loadBudget(teamId);
-  const orders = loadOrders(teamId).slice().reverse();
+  const [catalog, setCatalog] = useState(loadCatalog());
+  const [budget, setBudget] = useState(loadBudget(teamId));
+  const [orders, setOrders] = useState(loadOrders(teamId).slice().reverse());
+
   const pending = orders.filter((o) => o.status === "pending");
 
+  /* ===================== USERS ===================== */
   const [newUserName, setNewUserName] = useState("");
   const [newUserPin, setNewUserPin] = useState("");
   const [newUserRole, setNewUserRole] = useState("leader");
 
-  const [prodName, setProdName] = useState("");
-  const [prodCat, setProdCat] = useState("");
-  const [prodPrice, setProdPrice] = useState("");
+  const addUser = () => {
+    if (!newUserName.trim() || !newUserPin.trim()) return;
 
-  const [issueLeaderId, setIssueLeaderId] = useState(leaders[0]?.id ?? "");
-  const [issueName, setIssueName] = useState("");
-  const [issueSize, setIssueSize] = useState("-");
-  const [issueCost, setIssueCost] = useState("0");
-  const [issueDate, setIssueDate] = useState(new Date().toISOString().slice(0, 10));
+    const u = {
+      id: uuid(),
+      name: newUserName.trim(),
+      role: newUserRole,
+      pinHash: hashPin(newUserPin.trim()),
+      teamIds: [teamId],
+    };
 
-  const [budgetTotal, setBudgetTotal] = useState(String(budget.total));
+    const nextUsers = [...users, u];
+    jset("users", nextUsers);
 
+    setNewUserName("");
+    setNewUserPin("");
+    alert("Användare skapad ✅ (logga ut/in för att se i listor)");
+  };
+
+/* ===================== CATALOG ===================== */
+
+// formulär-state för ny produkt
+const [prodName, setProdName] = useState("");
+const [prodCat, setProdCat] = useState("");
+const [prodPrice, setProdPrice] = useState("");
+
+const addCatalogItem = () => {
+  const price = Number(prodPrice);
+  if (!prodName.trim() || !prodCat.trim() || !Number.isFinite(price)) return;
+
+  const next = [
+    ...catalog,
+    {
+      id: uuid(),
+      name: prodName.trim(),
+      category: prodCat.trim(),
+      price,
+      active: true,
+    },
+  ];
+
+  // 1. Uppdatera UI direkt
+  setCatalog(next);
+
+  // 2. Spara till backend (din befintliga helper)
+  saveCatalog(next);
+
+  // 3. Rensa formulär
+  setProdName("");
+  setProdCat("");
+  setProdPrice("");
+};
+
+const toggleCatalog = (id) => {
+  const next = catalog.map((p) =>
+    p.id === id ? { ...p, active: !p.active } : p
+  );
+  setCatalog(next);
+  saveCatalog(next);
+};
+
+const removeCatalog = (id) => {
+  const next = catalog.filter((p) => p.id !== id);
+  setCatalog(next);
+  saveCatalog(next);
+};
+  /* ===================== BUDGET ===================== */
+  const saveBudgetTotal = () => {
+    if (!Number.isFinite(Number(budget.total))) return;
+    saveBudget(teamId, budget);
+    alert("Budget sparad ✅");
+  };
+
+  /* ===================== ORDERS ===================== */
+  const approve = async (id) => {
+    approveOrder(teamId, user, id);
+    setOrders(loadOrders(teamId).slice().reverse());
+  };
+
+  const reject = async (id) => {
+    rejectOrder(teamId, user, id);
+    setOrders(loadOrders(teamId).slice().reverse());
+  };
+
+  /* ===================== RENDER ===================== */
   return (
     <div>
-      {/* Users */}
+      {/* USERS */}
       <div className="card">
-        <div className="card__top">
-          <div className="card__title">Användare</div>
-          <Pill tone="neutral">{teamUsers.length} kopplade</Pill>
+  <div className="card__title">Användare</div>
+
+  <div className="formGrid" style={{ marginTop: 10 }}>
+    <div className="field">
+      <span>Namn</span>
+      <input
+        value={newUserName}
+        onChange={(e) => setNewUserName(e.target.value)}
+        placeholder="T.ex. Anders"
+      />
+    </div>
+
+    <div className="field">
+      <span>PIN</span>
+      <input
+        value={newUserPin}
+        onChange={(e) => setNewUserPin(e.target.value)}
+        inputMode="numeric"
+        placeholder="4 siffror"
+      />
+    </div>
+
+    <div className="field">
+      <span>Roll</span>
+      <select
+        className="input"
+        value={newUserRole}
+        onChange={(e) => setNewUserRole(e.target.value)}
+      >
+        <option value="leader">Ledare</option>
+        <option value="admin">Admin</option>
+      </select>
+    </div>
+
+    <button className="btn btn--primary" onClick={addUser}>
+      Lägg till användare
+    </button>
+  </div>
+</div>
+
+
+      {/* CATALOG */}
+      <div className="card">
+  <div className="card__top">
+    <div className="card__title">Ledarkläder – Katalog</div>
+  </div>
+
+  {/* === LÄGG TILL PRODUKT === */}
+  <div className="formGrid" style={{ marginTop: 10 }}>
+    <div className="field">
+      <span>Namn</span>
+      <input
+        value={prodName}
+        onChange={(e) => setProdName(e.target.value)}
+        placeholder="T.ex. Träningsjacka"
+      />
+    </div>
+
+    <div className="field">
+      <span>Kategori</span>
+      <select
+        className="input"   // 👈 samma klass som övriga fält
+        value={prodCat}
+        onChange={(e) => setProdCat(e.target.value)}
+      >
+        <option value="">Välj kategori</option>
+        <option value="Startpaket">Startpaket</option>
+        <option value="Vartannat år">Vartannat år</option>
+        <option value="Tillval">Tillval</option>
+      </select>
+    </div>
+
+    <div className="field">
+      <span>Pris (kr)</span>
+      <input
+        value={prodPrice}
+        onChange={(e) => setProdPrice(e.target.value)}
+        inputMode="numeric"
+        placeholder="T.ex. 799"
+      />
+    </div>
+
+    <button className="btn btn--primary" onClick={addCatalogItem}>
+      Lägg till produkt
+    </button>
+  </div>
+
+  {/* === LISTA PRODUKTER === */}
+  <div className="history" style={{ marginTop: 12 }}>
+    {catalog.map((p) => (
+      <div key={p.id} className="historyRow">
+        <div>
+          <div className="historyRow__title">
+            {p.name} · {p.price} kr
+          </div>
+          <div className="historyRow__sub">
+            {p.category} · {p.active ? "Aktiv" : "Inaktiv"}
+          </div>
         </div>
 
-        <div className="formGrid" style={{ marginTop: 10 }}>
-          <div className="field">
-            <span>Namn</span>
-            <input value={newUserName} onChange={(e) => setNewUserName(e.target.value)} placeholder="T.ex. Anders" />
-          </div>
-          <div className="field">
-            <span>PIN</span>
-            <input value={newUserPin} onChange={(e) => setNewUserPin(e.target.value)} placeholder="4 siffror" inputMode="numeric" />
-          </div>
-          <div className="field">
-            <span>Roll</span>
-            <select value={newUserRole} onChange={(e) => setNewUserRole(e.target.value)}>
-              <option value="leader">Ledare</option>
-              <option value="admin">Admin</option>
-            </select>
-          </div>
+        <div style={{ display: "flex", gap: 8 }}>
+          <button
+            className="btn btn--ghost"
+            onClick={() => toggleCatalog(p.id)}
+          >
+            {p.active ? "Inaktivera" : "Aktivera"}
+          </button>
 
           <button
-            className="btn btn--primary"
-            onClick={() => {
-              if (!newUserName.trim() || !newUserPin.trim()) return;
-              const u = {
-                id: uuid(),
-                name: newUserName.trim(),
-                role: newUserRole,
-                pinHash: hashPin(newUserPin.trim()),
-                teamIds: [teamId],
-              };
-              jset("users", [...users, u]);
-              apiAddNotif(user.id, "Användare skapad ✅");
-              setNewUserName("");
-              setNewUserPin("");
-              alert("Skapad ✅ (logga ut/in för att se i listor)");
-            }}
+            className="btn btn--danger"
+            onClick={() => removeCatalog(p.id)}
           >
-            Lägg till användare (kopplas till aktivt lag)
+            Ta bort
           </button>
         </div>
       </div>
+    ))}
+  </div>
+</div>
 
-      {/* Budget */}
+      {/* BUDGET */}
+<div className="card">
+  <div className="card__title">Budget – {teamId}</div>
+
+  <div className="formGrid" style={{ marginTop: 10 }}>
+    <div className="field">
+      <span>Total budget</span>
+      <input
+        value={budget.total}
+        inputMode="numeric"
+        onChange={(e) =>
+          setBudget({ ...budget, total: Number(e.target.value) })
+        }
+      />
+    </div>
+
+    <button className="btn btn--ok" onClick={saveBudgetTotal}>
+      Spara budget
+    </button>
+  </div>
+</div>
+
+      {/* ORDERS */}
       <div className="card">
-        <div className="card__top">
-          <div className="card__title">Budget</div>
-          <Pill tone="neutral">{teamId}</Pill>
-        </div>
-        <div className="meta">
-          <div className="meta__row"><span>Förbrukat</span><span className="meta__value">{budget.used} kr</span></div>
-        </div>
-        <div className="field">
-          <span>Total budget</span>
-          <input value={budgetTotal} onChange={(e) => setBudgetTotal(e.target.value)} inputMode="numeric" />
-        </div>
-        <button
-          className="btn btn--ok"
-          onClick={() => {
-            const t = Number(budgetTotal);
-            if (!Number.isFinite(t) || t < 0) return;
-            saveBudget(teamId, { ...budget, total: t });
-            apiAddNotif(user.id, "Budget uppdaterad ✅");
-            alert("Sparad ✅");
-          }}
-        >
-          Spara budget
-        </button>
-      </div>
-
-      {/* Catalog */}
-      <div className="card">
-        <div className="card__top">
-          <div className="card__title">Sortiment (katalog)</div>
-          <Pill tone="neutral">{catalog.length} rader</Pill>
+        <div className="card__title">
+          Beställningar (väntar: {pending.length})
         </div>
 
-        <div className="formGrid" style={{ marginTop: 10 }}>
-          <div className="field"><span>Namn</span><input value={prodName} onChange={(e) => setProdName(e.target.value)} /></div>
-          <div className="field"><span>Kategori</span><input value={prodCat} onChange={(e) => setProdCat(e.target.value)} /></div>
-          <div className="field"><span>Pris</span><input value={prodPrice} onChange={(e) => setProdPrice(e.target.value)} inputMode="numeric" /></div>
-          <button
-            className="btn btn--primary"
-            onClick={() => {
-              const price = Number(prodPrice);
-              if (!prodName.trim() || !prodCat.trim() || !Number.isFinite(price)) return;
-              saveCatalog([...catalog, { id: uuid(), name: prodName.trim(), category: prodCat.trim(), price, active: true }]);
-              setProdName("");
-              setProdCat("");
-              setProdPrice("");
-              alert("Produkt tillagd ✅");
-            }}
-          >
-            Lägg till produkt
-          </button>
-        </div>
+        {pending.length === 0 && (
+          <div className="empty">Inga väntande beställningar</div>
+        )}
 
-        <div className="history" style={{ marginTop: 12 }}>
-          {catalog.map((p) => (
-            <div key={p.id} className="historyRow">
-              <div>
-                <div className="historyRow__title">{p.name}</div>
-                <div className="historyRow__sub">{p.category} · {p.price} kr</div>
-              </div>
-              <div style={{ display: "flex", gap: 8 }}>
-                <button className="btn btn--ghost" onClick={() => saveCatalog(catalog.map((x) => (x.id === p.id ? { ...x, active: !x.active } : x)))}>
-                  {p.active ? "Inaktivera" : "Aktivera"}
-                </button>
-                <button className="btn btn--danger" onClick={() => saveCatalog(catalog.filter((x) => x.id !== p.id))}>Ta bort</button>
-              </div>
+        {pending.map((o) => (
+          <div key={o.id} className="historyRow">
+            <div>
+              {o.createdByName} · {o.totalCost} kr
             </div>
-          ))}
-        </div>
-      </div>
-
-      {/* Orders approval */}
-      <div className="card">
-        <div className="card__top">
-          <div className="card__title">Beställningar (väntar)</div>
-          <Pill tone={pending.length > 0 ? "warn" : "neutral"}>{pending.length}</Pill>
-        </div>
-
-        {pending.length === 0 && <div className="empty">Inga väntande beställningar.</div>}
-
-        <div className="history" style={{ marginTop: 10 }}>
-          {pending.map((o) => (
-            <div key={o.id} className="historyRow">
-              <div>
-                <div className="historyRow__title">{o.createdByName}</div>
-                <div className="historyRow__sub">{new Date(o.createdAt).toLocaleString()} · {o.totalCost} kr</div>
-              </div>
-              <div style={{ display: "grid", gap: 8 }}>
-                <button
-                  className="btn btn--ok"
-                  onClick={() => {
-                    approveOrder(teamId, user, o.id);
-                    alert("Godkänd ✅");
-                    window.location.reload();
-                  }}
-                >
-                  Godkänn
-                </button>
-                <button
-                  className="btn btn--danger"
-                  onClick={() => {
-                    rejectOrder(teamId, user, o.id);
-                    alert("Avslagen ❌");
-                    window.location.reload();
-                  }}
-                >
-                  Avslå
-                </button>
-              </div>
+            <div style={{ display: "flex", gap: 8 }}>
+              <button className="btn btn--ok" onClick={() => approve(o.id)}>
+                Godkänn
+              </button>
+              <button
+                className="btn btn--danger"
+                onClick={() => reject(o.id)}
+              >
+                Avslå
+              </button>
             </div>
-          ))}
-        </div>
-      </div>
-
-      {/* Manual issue clothes */}
-      <div className="card">
-        <div className="card__top">
-          <div className="card__title">Utlämning (manuell)</div>
-          <Pill tone="neutral">{teamId}</Pill>
-        </div>
-
-        <div className="formGrid" style={{ marginTop: 10 }}>
-          <div className="field">
-            <span>Ledare</span>
-            <select value={issueLeaderId} onChange={(e) => setIssueLeaderId(e.target.value)}>
-              {leaders.map((l) => <option key={l.id} value={l.id}>{l.name}</option>)}
-            </select>
           </div>
-          <div className="field"><span>Plagg</span><input value={issueName} onChange={(e) => setIssueName(e.target.value)} /></div>
-          <div className="field"><span>Storlek</span><input value={issueSize} onChange={(e) => setIssueSize(e.target.value)} /></div>
-          <div className="field"><span>Kostnad (kr)</span><input value={issueCost} onChange={(e) => setIssueCost(e.target.value)} inputMode="numeric" /></div>
-          <div className="field"><span>Datum</span><input type="date" value={issueDate} onChange={(e) => setIssueDate(e.target.value)} /></div>
-
-          <button
-            className="btn btn--primary"
-            onClick={() => {
-              const leader = leaders.find((x) => x.id === issueLeaderId);
-              if (!leader || !issueName.trim()) return;
-              adminIssueClothes(teamId, user, leader.id, leader.name, issueName.trim(), issueSize || "-", Number(issueCost || 0), issueDate);
-              alert("Utlämnat ✅");
-              setIssueName("");
-              setIssueCost("0");
-            }}
-          >
-            Markera utlämnat
-          </button>
-        </div>
+        ))}
       </div>
     </div>
   );
 }
-
 /* ================= Page: Teamcash (Upstash) ================= */
 function TeamCashPage({ user, teamId }) {
   const [cash, setCash] = useState(null);
@@ -1847,7 +2015,9 @@ function ReportsPage(props) {
 
 function ReportsInner({ user, teamId, teamsAll }) {
   const team = teamsAll.find((t) => t.id === teamId);
-
+  const [mkRowsAll, setMkRowsAll] = useState([]);
+  const [scope, setScope] = useState("team"); // "team" | "all"
+  const [cashRowsAll, setCashRowsAll] = useState([]);
   const [cash, setCash] = useState(null);
   const [cashHist, setCashHist] = useState([]);
 
@@ -1858,18 +2028,93 @@ function ReportsInner({ user, teamId, teamsAll }) {
       setCash(cash);
       setCashHist(Array.isArray(hist) ? hist : []);
     });
-    return () => { alive = false; };
+    return () => {
+      alive = false;
+    };
   }, [teamId]);
+
+  useEffect(() => {
+  let alive = true;
+
+  if (scope !== "all") return;
+
+  (async () => {
+    const rows = [];
+
+    for (const t of teamsAll) {
+      const kit = await apiLoadMatchKit(t.id);
+      const safeKit = Array.isArray(kit) ? kit : [];
+
+      safeKit.forEach((m) => {
+        rows.push({
+          Lag: t.name,
+          Nummer: m.number,
+          Storlek: m.size,
+          Spelare: m.playerName ?? "",
+        });
+      });
+    }
+
+    if (alive) setMkRowsAll(rows);
+  })();
+
+  return () => {
+    alive = false;
+  };
+}, [scope, teamsAll]);
+useEffect(() => {
+  if (scope !== "all") return;
+
+  let alive = true;
+
+  (async () => {
+    const rows = [];
+
+    for (const t of teamsAll) {
+      const { cash, hist } = await apiCashSnapshot(t.id);
+
+      (hist ?? []).forEach((h) => {
+        rows.push({
+          Lag: t.name,
+          Kontonummer: cash?.accountNumber ?? "",
+          Månad: String(h.month),            // samma som valt lag
+          Saldo: h.balance,
+          Importerad: h.importedAt
+            ? new Date(h.importedAt).toLocaleDateString()
+            : "",
+        });
+      });
+    }
+
+    if (alive) setCashRowsAll(rows);
+  })();
+
+  return () => {
+    alive = false;
+  };
+}, [scope, teamsAll]);
+  const date = new Date().toISOString().slice(0, 10);
+
+  /* =========================
+     LAGKASSA
+  ========================= */
 
   const cashRows = cashHist.map((h) => ({
     Lag: team?.name ?? teamId,
     Kontonummer: cash?.accountNumber ?? "",
-    Månad: String(h.month), // text så Excel inte gör serienummer
+    Månad: String(h.month),
     Saldo: h.balance,
-    Importerad: h.importedAt ? new Date(h.importedAt).toLocaleDateString() : "",
+    Importerad: h.importedAt
+      ? new Date(h.importedAt).toLocaleDateString()
+      : "",
   }));
 
-  // övriga exports ligger kvar i localStorage tills vidare:
+
+
+  /* =========================
+     LEDARKLÄDER
+  ========================= */
+
   const issued = loadIssued(teamId);
   const issuedRows = issued.map((i) => ({
     Lag: team?.name ?? teamId,
@@ -1882,7 +2127,31 @@ function ReportsInner({ user, teamId, teamsAll }) {
     Källa: i.source,
   }));
 
-  const orders = loadOrders(teamId);
+  const issuedRowsAll = useMemo(() => {
+    const rows = [];
+    for (const t of teamsAll) {
+      const issued = loadIssued(t.id) ?? [];
+      issued.forEach((i) => {
+        rows.push({
+          Lag: t.name,
+          Ledare: i.leaderName,
+          Plagg: i.name,
+          Storlek: i.size,
+          Antal: i.quantity,
+          Datum: i.dateIssued,
+          Kostnad: i.cost,
+          Källa: i.source,
+        });
+      });
+    }
+    return rows;
+  }, [teamsAll]);
+
+  /* =========================
+     BESTÄLLNINGAR
+  ========================= */
+
+  const orders = loadOrders(teamId) ?? [];
   const orderRows = orders.map((o) => ({
     Lag: team?.name ?? teamId,
     Beställare: o.createdByName,
@@ -1891,14 +2160,42 @@ function ReportsInner({ user, teamId, teamsAll }) {
     Status: o.status,
   }));
 
+  const orderRowsAll = useMemo(() => {
+    const rows = [];
+    for (const t of teamsAll) {
+      const orders = loadOrders(t.id) ?? [];
+      orders.forEach((o) => {
+        rows.push({
+          Lag: t.name,
+          Beställare: o.createdByName,
+          Datum: new Date(o.createdAt).toLocaleString(),
+          Totalt: o.totalCost,
+          Status: o.status,
+        });
+      });
+    }
+    return rows;
+  }, [teamsAll]);
+
+  /* =========================
+     MATCHKLÄDER
+  ========================= */
+
   const matchKit = apiLoadMatchKit(teamId);
   const safeMatchKit = Array.isArray(matchKit) ? matchKit : [];
+
   const mkRows = safeMatchKit.map((m) => ({
     Lag: team?.name ?? teamId,
     Nummer: m.number,
     Storlek: m.size,
     Spelare: m.playerName ?? "",
   }));
+
+
+
+  /* =========================
+     RENDER
+  ========================= */
 
   return (
     <div>
@@ -1908,11 +2205,27 @@ function ReportsInner({ user, teamId, teamsAll }) {
           <Pill tone="neutral">{team?.name ?? teamId}</Pill>
         </div>
 
+        <div className="field">
+          <span>Omfattning</span>
+          <select
+            className="input"
+            value={scope}
+            onChange={(e) => setScope(e.target.value)}
+          >
+            <option value="team">Valt lag</option>
+            <option value="all">Alla lag</option>
+          </select>
+        </div>
+
         <div className="btnRow">
           <button
             className="btn btn--primary"
             onClick={() =>
-              exportXlsx("Lagkassa", cashRows, `lagkassa-${teamId}-${new Date().toISOString().slice(0, 10)}.xlsx`)
+              exportXlsx(
+                "Lagkassa",
+                scope === "all" ? cashRowsAll : cashRows,
+                `lagkassa-${scope === "all" ? "alla-lag" : teamId}-${date}.xlsx`
+              )
             }
           >
             Export Lagkassa
@@ -1921,7 +2234,11 @@ function ReportsInner({ user, teamId, teamsAll }) {
           <button
             className="btn btn--primary"
             onClick={() =>
-              exportXlsx("Ledarkläder", issuedRows, `ledarklader-${teamId}-${new Date().toISOString().slice(0, 10)}.xlsx`)
+              exportXlsx(
+                "Ledarkläder",
+                scope === "all" ? issuedRowsAll : issuedRows,
+                `ledarklader-${scope === "all" ? "alla-lag" : teamId}-${date}.xlsx`
+              )
             }
           >
             Export Ledarkläder
@@ -1932,7 +2249,11 @@ function ReportsInner({ user, teamId, teamsAll }) {
           <button
             className="btn btn--ghost"
             onClick={() =>
-              exportXlsx("Orders", orderRows, `orders-${teamId}-${new Date().toISOString().slice(0, 10)}.xlsx`)
+              exportXlsx(
+                "Orders",
+                scope === "all" ? orderRowsAll : orderRows,
+                `orders-${scope === "all" ? "alla-lag" : teamId}-${date}.xlsx`
+              )
             }
           >
             Export Beställningar
@@ -1941,7 +2262,11 @@ function ReportsInner({ user, teamId, teamsAll }) {
           <button
             className="btn btn--ghost"
             onClick={() =>
-              exportXlsx("Matchkläder", mkRows, `matchklader-${teamId}-${new Date().toISOString().slice(0, 10)}.xlsx`)
+              exportXlsx(
+                "Matchkläder",
+                scope === "all" ? mkRowsAll : mkRows,
+                `matchklader-${scope === "all" ? "alla-lag" : teamId}-${date}.xlsx`
+              )
             }
           >
             Export Matchkläder
