@@ -1148,64 +1148,152 @@ const sizes = useMemo(() => {
 }
 /* ================= Page: Matchkit ================= */
 function MatchKitPage({ user, teamId, teamsVisible }) {
-  const [items, setItems] = useState([]);
+  const isAdmin = user.role === "admin";
 
-
-useEffect(() => {
-  apiLoadMatchKit(teamId).then(setItems);
-}, [teamId]);
-
-useEffect(() => {
-  apiLoadMatchKit(teamId).then(setItems);
-  setSelected([]);
-}, [teamId]);
-
+  const [items, setItems] = useState([]);              // matchkit-items för aktuellt lag
+  const [selected, setSelected] = useState([]);        // markerade tröjor (admin)
   const [importMode, setImportMode] = useState("replace");
   const [moveFrom, setMoveFrom] = useState(teamId);
-  const [moveTo, setMoveTo] = useState(teamsVisible.find((t) => t.id !== teamId)?.id ?? teamId);
-  const [selected, setSelected] = useState([]);
+  const [moveTo, setMoveTo] = useState(
+    teamsVisible.find((t) => t.id !== teamId)?.id ?? teamId
+  );
 
+  // Ladda matchkit för valt lag (async, säkert)
   useEffect(() => {
-    apiLoadMatchKit(teamId).then(setItems);
-    setSelected([]);
-  }, [teamId]);
+    let alive = true;
+    (async () => {
+      try {
+        const data = await apiLoadMatchKit(teamId);
+        if (!alive) return;
+        setItems(Array.isArray(data) ? data : []);
+        setSelected([]);
+        setMoveFrom(teamId);
+        setMoveTo(teamsVisible.find((t) => t.id !== teamId)?.id ?? teamId);
+      } catch (e) {
+        console.error(e);
+        if (!alive) return;
+        setItems([]);
+        setSelected([]);
+      }
+    })();
+    return () => {
+      alive = false;
+    };
+  }, [teamId, teamsVisible]);
 
-  const isAdmin = user.role === "admin";
-  const assigned = items.filter((i) => String(i.playerName || "").trim()).length;
+  const assignedCount = useMemo(
+    () => items.filter((i) => String(i.playerName || "").trim()).length,
+    [items]
+  );
 
-  const toggle = (id) =>
-    setSelected((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
+  const toggleSelected = (id) => {
+    setSelected((prev) =>
+      prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]
+    );
+  };
 
-  const addItem = async () => {
-    if (!isAdmin) return;
-    const number = Number(prompt("Tröjnummer?"));
-    const size = prompt("Storlek (t.ex. 152, S, M)?") || "";
-    if (!Number.isFinite(number) || !size) return;
-    const next = [...items, { id: uuid(), number, size, playerName: "" }];
+  // Spara hela listan för aktuellt lag (UI först, backend sen)
+  const persist = async (next) => {
     setItems(next);
     await apiSaveMatchKit(teamId, next);
   };
 
+  // Admin: lägg till tröja manuellt
+  const addItem = async () => {
+    if (!isAdmin) return;
+    const number = Number(prompt("Tröjnummer?"));
+    const size = (prompt("Storlek (t.ex. 152, S, M)?") || "").trim();
+    if (!Number.isFinite(number) || !size) return;
 
-const updateItem = async (id, patch) => {
-  const next = items.map((i) => (i.id === id ? { ...i, ...patch } : i));
-  setItems(next);
-  await apiSaveMatchKit(teamId, next);
-};
+    const next = [...items, { id: uuid(), number, size, playerName: "" }];
+    await persist(next);
+  };
 
+  // Uppdatera en tröja (spelarnamn alltid, storlek bara admin)
+  const updateItem = async (id, patch) => {
+    const next = items.map((i) => (i.id === id ? { ...i, ...patch } : i));
+    await persist(next);
+  };
 
+  // Admin: ta bort tröja från lagets matchkit (OBS: påverkar inte warehouse)
   const removeItem = async (id) => {
     if (!isAdmin) return;
     const next = items.filter((i) => i.id !== id);
+    await persist(next);
+  };
+
+  // Admin: flytta markerade tröjor mellan lag (via API)
+  const moveMatchKitBetweenTeams = async (fromTeamId, toTeamId, ids) => {
+    const from = await apiLoadMatchKit(fromTeamId);
+    const to = await apiLoadMatchKit(toTeamId);
+
+    const safeFrom = Array.isArray(from) ? from : [];
+    const safeTo = Array.isArray(to) ? to : [];
+
+    const moving = safeFrom.filter((i) => ids.includes(i.id));
+    const nextFrom = safeFrom.filter((i) => !ids.includes(i.id));
+    const nextTo = [...safeTo, ...moving];
+
+    await apiSaveMatchKit(fromTeamId, nextFrom);
+    await apiSaveMatchKit(toTeamId, nextTo);
+
+    // om du flyttar från/eller till aktuellt lag – uppdatera vyn direkt
+    if (teamId === fromTeamId) setItems(nextFrom);
+    if (teamId === toTeamId) setItems(nextTo);
+    setSelected([]);
+  };
+
+  // Import matchkit Excel (nummer, storlek, spelare valfri)
+  const importMatchKitExcelHere = async (file, mode) => {
+    const rows = await parseMatchkitExcel(file);
+
+    const incoming = (Array.isArray(rows) ? rows : [])
+      .map((r) => ({
+        id: uuid(),
+        number: Number(r.nummer ?? r.Nummer ?? r.number ?? r.Number),
+        size: String(r.storlek ?? r.Storlek ?? r.size ?? r.Size ?? "").trim(),
+        playerName: String(r.spelare ?? r.Spelare ?? r.player ?? r.Player ?? "").trim(),
+      }))
+      .filter((x) => Number.isFinite(x.number) && x.size);
+
+    if (incoming.length === 0) {
+      alert("Filen innehåller inga giltiga rader (Nummer + Storlek krävs)");
+      return 0;
+    }
+
+    const next = mode === "replace" ? incoming : [...items, ...incoming];
+    await persist(next);
+    return incoming.length;
+  };
+
+  // Admin: returnera en tröja till huvudlager (warehouse)
+  // Detta var med i din äldre MatchKitPage via returnWarehouseItemFromTeam(...) [1](https://onedrive.live.com/?id=4d1e791f-0121-4f95-897e-e7de7c105576&cid=cd41a5a4fcd3f481&web=1)
+  const returnToWarehouse = async (itemId) => {
+    if (!isAdmin) return;
+
+    if (!confirm("Returnera tröjan till huvudlager?")) return;
+
+    // 1) ta bort från lagets matchkit
+    const next = items.filter((x) => x.id !== itemId);
     setItems(next);
     await apiSaveMatchKit(teamId, next);
+
+    // 2) uppdatera huvudlager: status=available, teamId=null
+    const warehouse = await apiLoadWarehouse();
+    const safeWarehouse = Array.isArray(warehouse) ? warehouse : [];
+
+    const updatedWarehouse = safeWarehouse.map((x) =>
+      x.id === itemId ? { ...x, status: "available", teamId: null } : x
+    );
+
+    await apiSaveWarehouse(updatedWarehouse);
   };
 
   return (
     <div>
       <div className="summaryCard">
         <div className="summaryTitle">Matchtröjor (lag)</div>
-        <div className="summaryValue">{assigned}/{items.length}</div>
+        <div className="summaryValue">{assignedCount}/{items.length}</div>
         <div className="summarySub">Tilldelade / Totalt</div>
       </div>
 
@@ -1216,11 +1304,11 @@ const updateItem = async (id, patch) => {
               <div className="card__title">#{it.number} · {it.size}</div>
               {String(it.playerName || "").trim()
                 ? <Pill tone="ok">Tilldelad</Pill>
-                : <Pill tone="neutral">Ej tilldelad</Pill>
-              }
+                : <Pill tone="neutral">Ej tilldelad</Pill>}
             </div>
 
             <div className="meta">
+              {/* ✅ Spelarnamn (återställt) [1](https://onedrive.live.com/?id=4d1e791f-0121-4f95-897e-e7de7c105576&cid=cd41a5a4fcd3f481&web=1) */}
               <div className="meta__row">
                 <span>Spelare</span>
                 <span className="meta__value">
@@ -1232,6 +1320,7 @@ const updateItem = async (id, patch) => {
                 </span>
               </div>
 
+              {/* Storlek (admin kan ändra) */}
               <div className="meta__row">
                 <span>Storlek</span>
                 <span className="meta__value">
@@ -1250,7 +1339,7 @@ const updateItem = async (id, patch) => {
                     <input
                       type="checkbox"
                       checked={selected.includes(it.id)}
-                      onChange={() => toggle(it.id)}
+                      onChange={() => toggleSelected(it.id)}
                     />
                   </span>
                 </div>
@@ -1259,22 +1348,21 @@ const updateItem = async (id, patch) => {
 
             {isAdmin && (
               <div className="btnRow">
-                <button className="btn btn--ghost" onClick={() => updateItem(it.id, { playerName: "" })}>Frigör</button>
+                <button
+                  className="btn btn--ghost"
+                  onClick={() => updateItem(it.id, { playerName: "" })}
+                >
+                  Frigör
+                </button>
 
-{user.role === "admin" && (
-  <button
-    className="btn btn--danger"
-    onClick={() => {
-      if (!confirm("Returnera tröjan till huvudlager?")) return;
-      returnWarehouseItemFromTeam(it.id, teamId);
-      setItems(apiLoadMatchKit(teamId)); // uppdatera vyn
-    }}
-  >
-    Returnera till lager
-  </button>
-)}
-
-                              </div>
+                {/* ✅ Returnera till lager (återställt) [1](https://onedrive.live.com/?id=4d1e791f-0121-4f95-897e-e7de7c105576&cid=cd41a5a4fcd3f481&web=1) */}
+                <button
+                  className="btn btn--danger"
+                  onClick={() => returnToWarehouse(it.id)}
+                >
+                  Returnera till lager
+                </button>
+              </div>
             )}
           </div>
         ))}
@@ -1282,16 +1370,24 @@ const updateItem = async (id, patch) => {
 
       <div className="card" style={{ marginTop: 12 }}>
         <div className="card__title">Åtgärder</div>
+
         <div className="btnRow">
-          <button className="btn btn--primary" onClick={addItem} disabled={!isAdmin}>Lägg till (admin)</button>
-          <button className="btn btn--ghost" onClick={() => alert("Ledare kan endast ändra namn, admin hanterar lager")}>Info</button>
+          <button className="btn btn--primary" onClick={addItem} disabled={!isAdmin}>
+            Lägg till (admin)
+          </button>
+          <button
+            className="btn btn--ghost"
+            onClick={() => alert("Ledare kan ändra spelarnamn. Admin hanterar lager/flytt/return.")}
+          >
+            Info
+          </button>
         </div>
 
         {isAdmin && (
           <>
             <div className="meta">
               <div className="meta__row">
-                <span>Flytta valda</span>
+                <span>Flytta markerade</span>
                 <span className="meta__value">{selected.length} st</span>
               </div>
             </div>
@@ -1299,27 +1395,27 @@ const updateItem = async (id, patch) => {
             <div className="formGrid">
               <div className="field">
                 <span>Från lag</span>
-                <select value={moveFrom} onChange={(e) => setMoveFrom(e.target.value)}>
-                  {teamsVisible.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
+                <select className="input" value={moveFrom} onChange={(e) => setMoveFrom(e.target.value)}>
+                  {teamsVisible.map((t) => (
+                    <option key={t.id} value={t.id}>{t.name}</option>
+                  ))}
                 </select>
               </div>
+
               <div className="field">
                 <span>Till lag</span>
-                <select value={moveTo} onChange={(e) => setMoveTo(e.target.value)}>
-                  {teamsVisible.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
+                <select className="input" value={moveTo} onChange={(e) => setMoveTo(e.target.value)}>
+                  {teamsVisible.map((t) => (
+                    <option key={t.id} value={t.id}>{t.name}</option>
+                  ))}
                 </select>
               </div>
             </div>
 
             <button
               className="btn btn--ok"
-              disabled={selected.length === 0}
-              onClick={() => {
-                moveMatchKit(moveFrom, moveTo, selected);
-                setItems(apiLoadMatchKit(teamId));
-                setSelected([]);
-                apiAddNotif(user.id, "Matchkläder flyttade ✅");
-              }}
+              disabled={selected.length === 0 || !moveFrom || !moveTo}
+              onClick={() => moveMatchKitBetweenTeams(moveFrom, moveTo, selected)}
             >
               Flytta markerade
             </button>
@@ -1330,24 +1426,27 @@ const updateItem = async (id, patch) => {
             <div className="meta">
               <div className="meta__row">
                 <span>Format</span>
-                <span className="meta__value">nummer, storlek, spelare</span>
+                <span className="meta__value">nummer, storlek, spelare (valfri)</span>
               </div>
             </div>
+
             <div className="field">
               <span>Läge</span>
-              <select value={importMode} onChange={(e) => setImportMode(e.target.value)}>
+              <select className="input" value={importMode} onChange={(e) => setImportMode(e.target.value)}>
                 <option value="replace">Ersätt</option>
                 <option value="append">Lägg till</option>
               </select>
             </div>
+
             <input
               type="file"
               accept=".xlsx,.xls"
+              onClick={(e) => { e.currentTarget.value = ""; }}
               onChange={async (e) => {
-                if (!e.target.files?.[0]) return;
-                const n = await importMatchKitExcel(teamId, e.target.files[0], importMode);
-                setItems(apiLoadMatchKit(teamId));
-                apiAddNotif(user.id, `Importerade ${n} tröjor ✅`);
+                const f = e.target.files?.[0];
+                if (!f) return;
+                const n = await importMatchKitExcelHere(f, importMode);
+                addNotification(user.id, `Importerade ${n} tröjor ✅`);
               }}
             />
           </>
@@ -1356,7 +1455,6 @@ const updateItem = async (id, patch) => {
     </div>
   );
 }
-
 /* ================= Page: Leaderclothes ================= */
 function LeaderClothesPage({ user, teamId, nav }) {
   const budget = loadBudget(teamId);
