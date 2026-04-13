@@ -25,7 +25,50 @@ async function apiSaveWarehouse(items) {
   });
   if (!r.ok) throw new Error("Kunde inte spara huvudlager");
 }
+// ===== API: ISSUED =====
+async function apiLoadIssued(teamId) {
+  const r = await fetch(`/api/issued-get?teamId=${encodeURIComponent(teamId)}`);
+  if (!r.ok) throw new Error("Kunde inte läsa issued");
+  return await r.json(); // array
+}
+async function apiSaveIssued(teamId, items) {
+  const r = await fetch("/api/issued-set", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ teamId, items }),
+  });
+  if (!r.ok) throw new Error("Kunde inte spara issued");
+}
 
+// ===== API: BUDGET =====
+async function apiLoadBudget(teamId) {
+  const r = await fetch(`/api/budget-get?teamId=${encodeURIComponent(teamId)}`);
+  if (!r.ok) throw new Error("Kunde inte läsa budget");
+  return await r.json(); // object
+}
+async function apiSaveBudget(teamId, budget) {
+  const r = await fetch("/api/budget-set", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ teamId, budget }),
+  });
+  if (!r.ok) throw new Error("Kunde inte spara budget");
+}
+
+// ===== API: ORDERS =====
+async function apiLoadOrders(teamId) {
+  const r = await fetch(`/api/orders-get?teamId=${encodeURIComponent(teamId)}`);
+  if (!r.ok) throw new Error("Kunde inte läsa orders");
+  return await r.json(); // array
+}
+async function apiSaveOrders(teamId, items) {
+  const r = await fetch("/api/orders-set", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ teamId, items }),
+  });
+  if (!r.ok) throw new Error("Kunde inte spara orders");
+}
 /* ================= Utilities ================= */
 const uuid = () =>
   globalThis.crypto?.randomUUID
@@ -229,6 +272,8 @@ function useTeams(user) {
 
   return { teams, visibleTeams, activeTeamId, setActiveTeamId };
 }
+
+
 
 /* ================= MatchKit ================= */
 async function apiLoadMatchKit(teamId) {
@@ -1146,6 +1191,7 @@ const sizes = useMemo(() => {
     </div>
   );
 }
+
 /* ================= Page: Matchkit ================= */
 function MatchKitPage({ user, teamId, teamsVisible }) {
   const isAdmin = user.role === "admin";
@@ -1165,6 +1211,7 @@ function MatchKitPage({ user, teamId, teamsVisible }) {
       try {
         const data = await apiLoadMatchKit(teamId);
         if (!alive) return;
+
         setItems(Array.isArray(data) ? data : []);
         setSelected([]);
         setMoveFrom(teamId);
@@ -1176,6 +1223,7 @@ function MatchKitPage({ user, teamId, teamsVisible }) {
         setSelected([]);
       }
     })();
+
     return () => {
       alive = false;
     };
@@ -1215,7 +1263,7 @@ function MatchKitPage({ user, teamId, teamsVisible }) {
     await persist(next);
   };
 
-  // Admin: ta bort tröja från lagets matchkit (OBS: påverkar inte warehouse)
+  // Admin: ta bort tröja från lagets matchkit
   const removeItem = async (id) => {
     if (!isAdmin) return;
     const next = items.filter((i) => i.id !== id);
@@ -1237,7 +1285,6 @@ function MatchKitPage({ user, teamId, teamsVisible }) {
     await apiSaveMatchKit(fromTeamId, nextFrom);
     await apiSaveMatchKit(toTeamId, nextTo);
 
-    // om du flyttar från/eller till aktuellt lag – uppdatera vyn direkt
     if (teamId === fromTeamId) setItems(nextFrom);
     if (teamId === toTeamId) setItems(nextTo);
     setSelected([]);
@@ -1252,7 +1299,9 @@ function MatchKitPage({ user, teamId, teamsVisible }) {
         id: uuid(),
         number: Number(r.nummer ?? r.Nummer ?? r.number ?? r.Number),
         size: String(r.storlek ?? r.Storlek ?? r.size ?? r.Size ?? "").trim(),
-        playerName: String(r.spelare ?? r.Spelare ?? r.player ?? r.Player ?? "").trim(),
+        playerName: String(
+          r.spelare ?? r.Spelare ?? r.player ?? r.Player ?? ""
+        ).trim(),
       }))
       .filter((x) => Number.isFinite(x.number) && x.size);
 
@@ -1267,10 +1316,8 @@ function MatchKitPage({ user, teamId, teamsVisible }) {
   };
 
   // Admin: returnera en tröja till huvudlager (warehouse)
-  // Detta var med i din äldre MatchKitPage via returnWarehouseItemFromTeam(...) [1](https://onedrive.live.com/?id=4d1e791f-0121-4f95-897e-e7de7c105576&cid=cd41a5a4fcd3f481&web=1)
   const returnToWarehouse = async (itemId) => {
     if (!isAdmin) return;
-
     if (!confirm("Returnera tröjan till huvudlager?")) return;
 
     // 1) ta bort från lagets matchkit
@@ -1293,7 +1340,9 @@ function MatchKitPage({ user, teamId, teamsVisible }) {
     <div>
       <div className="summaryCard">
         <div className="summaryTitle">Matchtröjor (lag)</div>
-        <div className="summaryValue">{assignedCount}/{items.length}</div>
+        <div className="summaryValue">
+          {assignedCount}/{items.length}
+        </div>
         <div className="summarySub">Tilldelade / Totalt</div>
       </div>
 
@@ -1301,26 +1350,30 @@ function MatchKitPage({ user, teamId, teamsVisible }) {
         {items.map((it) => (
           <div key={it.id} className="card">
             <div className="card__top">
-              <div className="card__title">#{it.number} · {it.size}</div>
-              {String(it.playerName || "").trim()
-                ? <Pill tone="ok">Tilldelad</Pill>
-                : <Pill tone="neutral">Ej tilldelad</Pill>}
+              <div className="card__title">
+                #{it.number} · {it.size}
+              </div>
+              {String(it.playerName || "").trim() ? (
+                <Pill tone="ok">Tilldelad</Pill>
+              ) : (
+                <Pill tone="neutral">Ej tilldelad</Pill>
+              )}
             </div>
 
             <div className="meta">
-              {/* ✅ Spelarnamn (återställt) [1](https://onedrive.live.com/?id=4d1e791f-0121-4f95-897e-e7de7c105576&cid=cd41a5a4fcd3f481&web=1) */}
               <div className="meta__row">
                 <span>Spelare</span>
                 <span className="meta__value">
                   <input
                     value={it.playerName || ""}
-                    onChange={(e) => updateItem(it.id, { playerName: e.target.value })}
+                    onChange={(e) =>
+                      updateItem(it.id, { playerName: e.target.value })
+                    }
                     placeholder="Namn"
                   />
                 </span>
               </div>
 
-              {/* Storlek (admin kan ändra) */}
               <div className="meta__row">
                 <span>Storlek</span>
                 <span className="meta__value">
@@ -1355,12 +1408,18 @@ function MatchKitPage({ user, teamId, teamsVisible }) {
                   Frigör
                 </button>
 
-                {/* ✅ Returnera till lager (återställt) [1](https://onedrive.live.com/?id=4d1e791f-0121-4f95-897e-e7de7c105576&cid=cd41a5a4fcd3f481&web=1) */}
                 <button
                   className="btn btn--danger"
                   onClick={() => returnToWarehouse(it.id)}
                 >
                   Returnera till lager
+                </button>
+
+                <button
+                  className="btn btn--danger"
+                  onClick={() => removeItem(it.id)}
+                >
+                  Ta bort
                 </button>
               </div>
             )}
@@ -1372,12 +1431,18 @@ function MatchKitPage({ user, teamId, teamsVisible }) {
         <div className="card__title">Åtgärder</div>
 
         <div className="btnRow">
-          <button className="btn btn--primary" onClick={addItem} disabled={!isAdmin}>
+          <button
+            className="btn btn--primary"
+            onClick={addItem}
+            disabled={!isAdmin}
+          >
             Lägg till (admin)
           </button>
           <button
             className="btn btn--ghost"
-            onClick={() => alert("Ledare kan ändra spelarnamn. Admin hanterar lager/flytt/return.")}
+            onClick={() =>
+              alert("Ledare kan ändra spelarnamn. Admin hanterar lager/flytt/return.")
+            }
           >
             Info
           </button>
@@ -1395,18 +1460,30 @@ function MatchKitPage({ user, teamId, teamsVisible }) {
             <div className="formGrid">
               <div className="field">
                 <span>Från lag</span>
-                <select className="input" value={moveFrom} onChange={(e) => setMoveFrom(e.target.value)}>
+                <select
+                  className="input"
+                  value={moveFrom}
+                  onChange={(e) => setMoveFrom(e.target.value)}
+                >
                   {teamsVisible.map((t) => (
-                    <option key={t.id} value={t.id}>{t.name}</option>
+                    <option key={t.id} value={t.id}>
+                      {t.name}
+                    </option>
                   ))}
                 </select>
               </div>
 
               <div className="field">
                 <span>Till lag</span>
-                <select className="input" value={moveTo} onChange={(e) => setMoveTo(e.target.value)}>
+                <select
+                  className="input"
+                  value={moveTo}
+                  onChange={(e) => setMoveTo(e.target.value)}
+                >
                   {teamsVisible.map((t) => (
-                    <option key={t.id} value={t.id}>{t.name}</option>
+                    <option key={t.id} value={t.id}>
+                      {t.name}
+                    </option>
                   ))}
                 </select>
               </div>
@@ -1426,13 +1503,19 @@ function MatchKitPage({ user, teamId, teamsVisible }) {
             <div className="meta">
               <div className="meta__row">
                 <span>Format</span>
-                <span className="meta__value">nummer, storlek, spelare (valfri)</span>
+                <span className="meta__value">
+                  nummer, storlek, spelare (valfri)
+                </span>
               </div>
             </div>
 
             <div className="field">
               <span>Läge</span>
-              <select className="input" value={importMode} onChange={(e) => setImportMode(e.target.value)}>
+              <select
+                className="input"
+                value={importMode}
+                onChange={(e) => setImportMode(e.target.value)}
+              >
                 <option value="replace">Ersätt</option>
                 <option value="append">Lägg till</option>
               </select>
@@ -1441,7 +1524,9 @@ function MatchKitPage({ user, teamId, teamsVisible }) {
             <input
               type="file"
               accept=".xlsx,.xls"
-              onClick={(e) => { e.currentTarget.value = ""; }}
+              onClick={(e) => {
+                e.currentTarget.value = "";
+              }}
               onChange={async (e) => {
                 const f = e.target.files?.[0];
                 if (!f) return;
@@ -1457,78 +1542,122 @@ function MatchKitPage({ user, teamId, teamsVisible }) {
 }
 /* ================= Page: Leaderclothes ================= */
 function LeaderClothesPage({ user, teamId, nav }) {
-  const budget = loadBudget(teamId);
-  const remaining = Math.max(0, budget.total - budget.used);
-  const issued = loadIssued(teamId);
+  const [budget, setBudget] = useState({ teamId, total: 0, used: 0 });
+  const [issued, setIssued] = useState([]);
   const catalog = loadCatalog().filter((p) => p.active);
 
-  const myIssued = user.role === "leader"
-    ? issued.filter((i) => i.leaderUserId === user.id)
-    : issued;
+  useEffect(() => {
+    let alive = true;
+
+    (async () => {
+      try {
+        const [b, i] = await Promise.all([
+          apiLoadBudget(teamId),
+          apiLoadIssued(teamId),
+        ]);
+
+        if (!alive) return;
+
+        setBudget(b ?? { teamId, total: 0, used: 0 });
+        setIssued(Array.isArray(i) ? i : []);
+      } catch (e) {
+        console.error(e);
+      }
+    })();
+
+    return () => {
+      alive = false;
+    };
+  }, [teamId]);
+
+  const remaining = Math.max(0, budget.total - budget.used);
+
+  const myIssued =
+    user.role === "leader"
+      ? issued.filter((i) => i.leaderUserId === user.id)
+      : issued;
 
   return (
     <div>
+      {/* BUDGET */}
       <div className="summaryCard">
         <div className="summaryTitle">Budget (ledarkläder)</div>
         <div className="summaryValue">{remaining} kr</div>
-        <div className="summarySub">Kvar att handla för · Totalt {budget.total} kr</div>
+        <div className="summarySub">
+          Kvar att handla för · Totalt {budget.total} kr
+        </div>
       </div>
 
+      {/* ISSUED HEADER */}
       <div className="card">
         <div className="card__top">
           <div className="card__title">Uthämtade ledarkläder</div>
           <Pill tone="neutral">{myIssued.length} rader</Pill>
         </div>
-        {myIssued.length === 0 && <div className="empty">Inga registrerade utlämningar ännu.</div>}
+        {myIssued.length === 0 && (
+          <div className="empty">
+            Inga registrerade utlämningar ännu.
+          </div>
+        )}
       </div>
 
+      {/* ISSUED LIST */}
       <div className="history">
         {myIssued.map((i) => (
           <div key={i.id} className="historyRow">
             <div>
               <div className="historyRow__title">
-                {i.leaderName} · {i.name} {i.quantity > 1 ? `x${i.quantity}` : ""}
-                
+                {i.leaderName} · {i.name}
+                {i.quantity > 1 ? ` x${i.quantity}` : ""}
               </div>
               <div className="historyRow__sub">
-                {i.dateIssued} · {i.source === "order" ? "Beställning" : "Manuell"}
+                {i.dateIssued} ·{" "}
+                {i.source === "order" ? "Beställning" : "Manuell"}
               </div>
             </div>
-            <div className="historyRow__delta neg">{i.cost} kr</div>
-            {user.role === "admin" && (
-  <button
-    className="btn btn--danger"
-    onClick={async () => {
-      if (!confirm("Ta bort ledarklädesplagg från laget?")) return;
 
-      try {
-        const updated = await adminRemoveLeaderClothesItem(
-          teamId,
-          item.id
-        );
-        setOrders(updated);   // ✅ uppdatera UI direkt
-      } catch (e) {
-        alert("Kunde inte ta bort ledarklädesplagg");
-        console.error(e);
-      }
-    }}
-  >
-    Ta bort från lag
-  </button>
-)}
+            <div className="historyRow__delta neg">{i.cost} kr</div>
+
+            {/* ADMIN: TA BORT */}
+            {user.role === "admin" && (
+              <button
+                className="btn btn--danger"
+                onClick={async () => {
+                  if (!confirm("Ta bort ledarklädesplagg från laget?")) return;
+
+                  try {
+                    const nextIssued = issued.filter((x) => x.id !== i.id);
+                    await apiSaveIssued(teamId, nextIssued);
+                    setIssued(nextIssued);
+                  } catch (e) {
+                    alert("Kunde inte ta bort ledarklädesplagg");
+                    console.error(e);
+                  }
+                }}
+              >
+                Ta bort från lag
+              </button>
+            )}
           </div>
         ))}
       </div>
 
+      {/* ORDER CTA */}
       <div className="card" style={{ marginTop: 12 }}>
         <div className="card__top">
           <div className="card__title">Beställ ledarkläder</div>
           <Pill tone="ok">{catalog.length} produkter</Pill>
         </div>
+
         <div className="muted" style={{ fontSize: 12, marginTop: 8 }}>
           Beställning skickas för godkännande. Budget dras först vid godkännande.
         </div>
-        <button className="btn btn--primary" style={{ marginTop: 10 }} onClick={() => nav("/order")}>
+
+        <button
+          className="btn btn--primary"
+          style={{ marginTop: 10 }}
+          onClick={() => nav("/order")}
+        >
           Öppna beställning
         </button>
       </div>
@@ -1538,15 +1667,74 @@ function LeaderClothesPage({ user, teamId, nav }) {
 
 /* ================= Page: Order ================= */
 function OrderPage({ user, teamId }) {
-  const products = loadCatalog().filter((p) => p.active);
+  // Sortiment (katalogen kan vara lokal tills vidare)
+  const products = (loadCatalog?.() ?? []).filter((p) => p.active);
+
+  // Varukorg: { productId, name, price, quantity, size }
   const [cart, setCart] = useState([]);
 
   const add = (p) => {
     if (cart.find((i) => i.productId === p.id)) return;
-    setCart([...cart, { productId: p.id, name: p.name, price: p.price, quantity: 1, size: "-" }]);
+    setCart([
+      ...cart,
+      { productId: p.id, name: p.name, price: p.price, quantity: 1, size: "-" },
+    ]);
+  };
+
+  const remove = (productId) => {
+    setCart(cart.filter((i) => i.productId !== productId));
+  };
+
+  const setQty = (productId, quantity) => {
+    const q = Math.max(1, Number(quantity || 1));
+    setCart(
+      cart.map((i) => (i.productId === productId ? { ...i, quantity: q } : i))
+    );
+  };
+
+  const setSize = (productId, size) => {
+    setCart(
+      cart.map((i) => (i.productId === productId ? { ...i, size } : i))
+    );
   };
 
   const total = cart.reduce((s, i) => s + i.price * i.quantity, 0);
+
+  // ✅ Skapa order via API så Admin ser den
+  const submitOrder = async () => {
+    if (cart.length === 0) return;
+
+    const order = {
+      id: uuid(),
+      createdAt: new Date().toISOString(),
+      createdByUserId: user.id,
+      createdByName: user.name,
+      teamId,
+      items: cart.map((i) => ({
+        productId: i.productId,
+        name: i.name,
+        price: i.price,
+        quantity: i.quantity,
+        size: i.size,
+      })),
+      totalCost: total,
+      status: "pending",
+    };
+
+    // Hämta senaste listan från servern för att undvika att skriva på gammal lokal data
+    const existing = await apiLoadOrders(teamId);
+    const safeExisting = Array.isArray(existing) ? existing : [];
+    const next = [...safeExisting, order];
+
+    await apiSaveOrders(teamId, next);
+
+    // UI feedback
+    setCart([]);
+    if (typeof addNotification === "function") {
+      addNotification(user.id, "Beställning skickad ✅");
+    }
+    alert("Beställning skickad ✅\n(Admin kan nu godkänna i Admin-vyn)");
+  };
 
   return (
     <div>
@@ -1563,7 +1751,10 @@ function OrderPage({ user, teamId }) {
                 <div className="historyRow__title">{p.name}</div>
                 <div className="historyRow__sub">{p.category} · {p.price} kr</div>
               </div>
-              <button className="btn btn--ok" onClick={() => add(p)}>Lägg till</button>
+
+              <button className="btn btn--ok" onClick={() => add(p)}>
+                Lägg till
+              </button>
             </div>
           ))}
         </div>
@@ -1575,51 +1766,75 @@ function OrderPage({ user, teamId }) {
           <Pill tone="neutral">{cart.length} rader</Pill>
         </div>
 
-        {cart.length === 0 && <div className="empty">Ingen produkt vald ännu.</div>}
+        {cart.length === 0 && (
+          <div className="empty">Ingen produkt vald ännu.</div>
+        )}
 
         {cart.map((i) => (
-          <div key={i.productId} className="meta">
-            <div className="meta__row"><span>{i.name}</span><span className="meta__value">{i.price} kr</span></div>
+          <div key={i.productId} className="meta" style={{ marginTop: 10 }}>
+            <div className="meta__row">
+              <span>{i.name}</span>
+              <span className="meta__value">{i.price} kr</span>
+            </div>
+
             <div className="meta__row">
               <span>Antal</span>
               <span className="meta__value">
                 <input
                   value={i.quantity}
-                  onChange={(e) => {
-                    const q = Math.max(1, Number(e.target.value || 1));
-                    setCart(cart.map((x) => (x.productId === i.productId ? { ...x, quantity: q } : x)));
-                  }}
                   inputMode="numeric"
+                  onChange={(e) => setQty(i.productId, e.target.value)}
                 />
               </span>
+            </div>
+
+            <div className="meta__row">
+              <span>Storlek</span>
+              <span className="meta__value">
+                <input
+                  value={i.size}
+                  onChange={(e) => setSize(i.productId, e.target.value)}
+                  placeholder="t.ex. S, M, L"
+                />
+              </span>
+            </div>
+
+            <div className="btnRow" style={{ marginTop: 8 }}>
+              <button className="btn btn--danger" onClick={() => remove(i.productId)}>
+                Ta bort
+              </button>
             </div>
           </div>
         ))}
 
-        <div className="qtyRow">
+        <div className="qtyRow" style={{ marginTop: 12 }}>
           <div>
             <div className="qty__label">Totalt</div>
             <div className="qty__value">{total} kr</div>
           </div>
+
           <div className="miniMeta">
             <div>Lag: {teamId}</div>
-            <div>Status: skickas</div>
+            <div>Status: skickas som pending</div>
           </div>
         </div>
 
-        <div className="btnRow">
+        <div className="btnRow" style={{ marginTop: 10 }}>
           <button
             className="btn btn--primary"
             disabled={cart.length === 0}
-            onClick={() => {
-              createOrder(teamId, user, cart);
-              setCart([]);
-              alert("Beställning skickad ✅");
-            }}
+            onClick={submitOrder}
           >
-            Skicka
+            Skicka beställning
           </button>
-          <button className="btn btn--ghost" onClick={() => setCart([])}>Töm</button>
+
+          <button className="btn btn--ghost" onClick={() => setCart([])}>
+            Töm
+          </button>
+        </div>
+
+        <div className="muted" style={{ fontSize: 12, marginTop: 8 }}>
+          Beställningen sparas centralt (API). Budget dras och utlämning (Issued) skapas vid godkännande i Admin.
         </div>
       </div>
     </div>
@@ -1643,18 +1858,45 @@ function AdminPage(props) {
 }
 
 function AdminInner({ user, teamId }) {
-  /* ===================== DATA ===================== */
+  /* ===================== USERS (lokalt OK tills vidare) ===================== */
   const users = jget("users", []);
   const teamUsers = users.filter((u) => u.teamIds?.includes(teamId));
   const leaders = teamUsers.filter((u) => u.role === "leader");
 
-  const [catalog, setCatalog] = useState(loadCatalog());
-  const [budget, setBudget] = useState(loadBudget(teamId));
-  const [orders, setOrders] = useState(loadOrders(teamId).slice().reverse());
+  /* ===================== ISSUED / BUDGET / ORDERS (API) ===================== */
+  const [issued, setIssued] = useState([]);
+  const [budget, setBudget] = useState({ teamId, total: 0, used: 0 });
+  const [orders, setOrders] = useState([]);
+
+  useEffect(() => {
+    let alive = true;
+
+    (async () => {
+      try {
+        const [i, b, o] = await Promise.all([
+          apiLoadIssued(teamId),
+          apiLoadBudget(teamId),
+          apiLoadOrders(teamId),
+        ]);
+
+        if (!alive) return;
+
+        setIssued(Array.isArray(i) ? i : []);
+        setBudget(b ?? { teamId, total: 0, used: 0 });
+        setOrders(Array.isArray(o) ? o.slice().reverse() : []);
+      } catch (e) {
+        console.error(e);
+      }
+    })();
+
+    return () => {
+      alive = false;
+    };
+  }, [teamId]);
 
   const pending = orders.filter((o) => o.status === "pending");
 
-  /* ===================== USERS ===================== */
+  /* ===================== ADD USER ===================== */
   const [newUserName, setNewUserName] = useState("");
   const [newUserPin, setNewUserPin] = useState("");
   const [newUserRole, setNewUserRole] = useState("leader");
@@ -1670,127 +1912,250 @@ function AdminInner({ user, teamId }) {
       teamIds: [teamId],
     };
 
-    const nextUsers = [...users, u];
-    jset("users", nextUsers);
+    jset("users", [...users, u]);
 
     setNewUserName("");
     setNewUserPin("");
     alert("Användare skapad ✅ (logga ut/in för att se i listor)");
   };
 
-/* ===================== CATALOG ===================== */
+  /* ===================== CATALOG (oförändrad) ===================== */
+  const [catalog, setCatalog] = useState(loadCatalog());
+  const [prodName, setProdName] = useState("");
+  const [prodCat, setProdCat] = useState("");
+  const [prodPrice, setProdPrice] = useState("");
 
-// formulär-state för ny produkt
-const [prodName, setProdName] = useState("");
-const [prodCat, setProdCat] = useState("");
-const [prodPrice, setProdPrice] = useState("");
+  const addCatalogItem = () => {
+    const price = Number(prodPrice);
+    if (!prodName.trim() || !prodCat.trim() || !Number.isFinite(price)) return;
 
-const addCatalogItem = () => {
-  const price = Number(prodPrice);
-  if (!prodName.trim() || !prodCat.trim() || !Number.isFinite(price)) return;
+    const next = [
+      ...catalog,
+      { id: uuid(), name: prodName.trim(), category: prodCat.trim(), price, active: true },
+    ];
 
-  const next = [
-    ...catalog,
-    {
-      id: uuid(),
-      name: prodName.trim(),
-      category: prodCat.trim(),
-      price,
-      active: true,
-    },
-  ];
+    setCatalog(next);
+    saveCatalog(next);
+    setProdName("");
+    setProdCat("");
+    setProdPrice("");
+  };
 
-  // 1. Uppdatera UI direkt
-  setCatalog(next);
+  const toggleCatalog = (id) => {
+    const next = catalog.map((p) =>
+      p.id === id ? { ...p, active: !p.active } : p
+    );
+    setCatalog(next);
+    saveCatalog(next);
+  };
 
-  // 2. Spara till backend (din befintliga helper)
-  saveCatalog(next);
+  const removeCatalog = (id) => {
+    const next = catalog.filter((p) => p.id !== id);
+    setCatalog(next);
+    saveCatalog(next);
+  };
 
-  // 3. Rensa formulär
-  setProdName("");
-  setProdCat("");
-  setProdPrice("");
-};
-
-const toggleCatalog = (id) => {
-  const next = catalog.map((p) =>
-    p.id === id ? { ...p, active: !p.active } : p
-  );
-  setCatalog(next);
-  saveCatalog(next);
-};
-
-const removeCatalog = (id) => {
-  const next = catalog.filter((p) => p.id !== id);
-  setCatalog(next);
-  saveCatalog(next);
-};
   /* ===================== BUDGET ===================== */
-  const saveBudgetTotal = () => {
+  const saveBudgetTotal = async () => {
     if (!Number.isFinite(Number(budget.total))) return;
-    saveBudget(teamId, budget);
+    await apiSaveBudget(teamId, budget);
     alert("Budget sparad ✅");
   };
 
   /* ===================== ORDERS ===================== */
   const approve = async (id) => {
-    approveOrder(teamId, user, id);
-    setOrders(loadOrders(teamId).slice().reverse());
-  };
+  const order = orders.find((o) => o.id === id);
+  if (!order || order.status !== "pending") return;
 
-  const reject = async (id) => {
-    rejectOrder(teamId, user, id);
-    setOrders(loadOrders(teamId).slice().reverse());
-  };
+  /* 1️⃣ GODKÄNN ORDER */
+  const nextOrders = orders.map((o) =>
+    o.id === id ? { ...o, status: "approved" } : o
+  );
+  await apiSaveOrders(teamId, nextOrders);
+  setOrders(nextOrders.slice().reverse());
 
+
+  /* 2️⃣ UPPDATERA BUDGET */
+  const nextBudget = {
+    ...budget,
+    used: (budget.used || 0) + order.totalCost,
+  };
+  await apiSaveBudget(teamId, nextBudget);
+  setBudget(nextBudget);
+
+  /* 3️⃣ SKAPA ISSUED-POSTER */
+  const existingIssued = await apiLoadIssued(teamId);
+
+  const issuedFromOrder = order.items.map((i) => ({
+    id: uuid(),
+    leaderUserId: order.createdByUserId,
+    leaderName: order.createdByName,
+    name: i.name,
+    size: i.size,
+    quantity: i.quantity,
+    cost: i.price * i.quantity,
+    dateIssued: new Date().toISOString().slice(0, 10),
+    source: "order",
+  }));
+
+  const nextIssued = [...existingIssued, ...issuedFromOrder];
+  await apiSaveIssued(teamId, nextIssued);
+};
+const reject = async (id) => {
+  const order = orders.find((o) => o.id === id);
+  if (!order || order.status !== "pending") return;
+
+  if (!confirm("Vill du avslå denna beställning?")) return;
+
+  const nextOrders = orders.map((o) =>
+    o.id === id ? { ...o, status: "rejected" } : o
+  );
+
+  // 1️⃣ Spara till backend
+  await apiSaveOrders(teamId, nextOrders);
+
+  // 2️⃣ Uppdatera UI
+  setOrders(nextOrders.slice().reverse());
+};
   /* ===================== RENDER ===================== */
   return (
     <div>
-      {/* USERS */}
+            {/* BUDGET */}
       <div className="card">
-  <div className="card__title">Användare</div>
+        <div className="card__title">Budget – {teamId}</div>
 
-  <div className="formGrid" style={{ marginTop: 10 }}>
-    <div className="field">
-      <span>Namn</span>
-      <input
-        value={newUserName}
-        onChange={(e) => setNewUserName(e.target.value)}
-        placeholder="T.ex. Anders"
-      />
-    </div>
-
-    <div className="field">
-      <span>PIN</span>
-      <input
-        value={newUserPin}
-        onChange={(e) => setNewUserPin(e.target.value)}
-        inputMode="numeric"
-        placeholder="4 siffror"
-      />
-    </div>
-
-    <div className="field">
-      <span>Roll</span>
-      <select
-        className="input"
-        value={newUserRole}
-        onChange={(e) => setNewUserRole(e.target.value)}
-      >
-        <option value="leader">Ledare</option>
-        <option value="admin">Admin</option>
-      </select>
-    </div>
-
-    <button className="btn btn--primary" onClick={addUser}>
-      Lägg till användare
-    </button>
-  </div>
+        <div className="formGrid" style={{ marginTop: 10 }}>
+          <div className="field">
+            <span>Total budget</span>
+            <input
+              value={budget.total}
+              onChange={(e) =>
+                setBudget({ ...budget, total: Number(e.target.value) })
+              }
+            />
+          </div>
+          <button className="btn btn--ok" onClick={saveBudgetTotal}>
+            Spara budget
+          </button>
+<div className="field" style={{ marginTop: 10 }}>
+  <span>Korrigera använd budget (kr)</span>
+  <input
+    inputMode="numeric"
+    value={budget.used}
+    onChange={(e) =>
+      setBudget({ ...budget, used: Number(e.target.value) || 0 })
+    }
+  />
 </div>
 
+<button
+  className="btn btn--ok"
+  onClick={async () => {
+    await apiSaveBudget(teamId, budget);
+    alert("Budget uppdaterad ✅");
+  }}
+>
+  Spara korrigerad budget
+</button>
+          
+          <button
+  className="btn btn--danger"
+  style={{ marginTop: 10 }}
+  onClick={async () => {
+    if (
+      !confirm(
+        "Detta återställer använd budget (used = 0). Historiska utdelningar påverkas inte.\n\nFortsätt?"
+      )
+    )
+      return;
+
+    const resetBudget = {
+      ...budget,
+      used: 0,
+    };
+
+    await apiSaveBudget(teamId, resetBudget);
+    setBudget(resetBudget);
+
+    alert("Använd budget återställd ✅");
+  }}
+>
+  Återställ använd budget
+    </button>
+
+        </div>
+      </div>
+{/* ==== AVDELSARE: ADMINISTRERA ALLA LAG ==== */}
+<div
+  style={{
+    margin: "24px 4px 12px",
+    paddingTop: 12,
+    borderTop: "1px solid var(--border)",
+    fontWeight: 600,
+    fontSize: 14,
+    opacity: 0.8,
+  }}
+>
+  Administrera alla lag
+</div>
+
+            {/* ORDERS */}
+      <div className="card">
+        <div className="card__title">
+          Beställningar (väntar: {pending.length})
+        </div>
+
+        {pending.length === 0 && (
+          <div className="empty">Inga väntande beställningar</div>
+        )}
+
+        {pending.map((o) => (
+          <div key={o.id} className="historyRow">
+            <div>{o.createdByName} · {o.totalCost} kr</div>
+            <div style={{ display: "flex", gap: 8 }}>
+              <button className="btn btn--ok" onClick={() => approve(o.id)}>
+                Godkänn
+              </button>
+              <button className="btn btn--danger" onClick={() => reject(o.id)}>
+                Avslå
+              </button>
+            </div>
+          </div>
+        ))}
+      </div>
+
+
+      {/* USERS */}
+      <div className="card">
+        <div className="card__title">Användare</div>
+
+        <div className="formGrid" style={{ marginTop: 10 }}>
+          <div className="field">
+            <span>Namn</span>
+            <input value={newUserName} onChange={(e) => setNewUserName(e.target.value)} />
+          </div>
+
+          <div className="field">
+            <span>PIN</span>
+            <input value={newUserPin} onChange={(e) => setNewUserPin(e.target.value)} />
+          </div>
+
+          <div className="field">
+            <span>Roll</span>
+            <select value={newUserRole} onChange={(e) => setNewUserRole(e.target.value)}>
+              <option value="leader">Ledare</option>
+              <option value="admin">Admin</option>
+            </select>
+          </div>
+
+          <button className="btn btn--primary" onClick={addUser}>
+            Lägg till användare
+          </button>
+        </div>
+      </div>
 
       {/* CATALOG */}
-      <div className="card">
+<div className="card">
   <div className="card__top">
     <div className="card__title">Ledarkläder – Katalog</div>
   </div>
@@ -1809,7 +2174,7 @@ const removeCatalog = (id) => {
     <div className="field">
       <span>Kategori</span>
       <select
-        className="input"   // 👈 samma klass som övriga fält
+        className="input"
         value={prodCat}
         onChange={(e) => setProdCat(e.target.value)}
       >
@@ -1837,6 +2202,10 @@ const removeCatalog = (id) => {
 
   {/* === LISTA PRODUKTER === */}
   <div className="history" style={{ marginTop: 12 }}>
+    {catalog.length === 0 && (
+      <div className="empty">Inga produkter i katalogen ännu.</div>
+    )}
+
     {catalog.map((p) => (
       <div key={p.id} className="historyRow">
         <div>
@@ -1868,60 +2237,13 @@ const removeCatalog = (id) => {
   </div>
 </div>
 
-      {/* BUDGET */}
-<div className="card">
-  <div className="card__title">Budget – {teamId}</div>
 
-  <div className="formGrid" style={{ marginTop: 10 }}>
-    <div className="field">
-      <span>Total budget</span>
-      <input
-        value={budget.total}
-        inputMode="numeric"
-        onChange={(e) =>
-          setBudget({ ...budget, total: Number(e.target.value) })
-        }
-      />
-    </div>
 
-    <button className="btn btn--ok" onClick={saveBudgetTotal}>
-      Spara budget
-    </button>
-  </div>
-</div>
 
-      {/* ORDERS */}
-      <div className="card">
-        <div className="card__title">
-          Beställningar (väntar: {pending.length})
-        </div>
-
-        {pending.length === 0 && (
-          <div className="empty">Inga väntande beställningar</div>
-        )}
-
-        {pending.map((o) => (
-          <div key={o.id} className="historyRow">
-            <div>
-              {o.createdByName} · {o.totalCost} kr
-            </div>
-            <div style={{ display: "flex", gap: 8 }}>
-              <button className="btn btn--ok" onClick={() => approve(o.id)}>
-                Godkänn
-              </button>
-              <button
-                className="btn btn--danger"
-                onClick={() => reject(o.id)}
-              >
-                Avslå
-              </button>
-            </div>
-          </div>
-        ))}
-      </div>
     </div>
   );
 }
+
 /* ================= Page: Teamcash (Upstash) ================= */
 function TeamCashPage({ user, teamId }) {
   const [cash, setCash] = useState(null);
