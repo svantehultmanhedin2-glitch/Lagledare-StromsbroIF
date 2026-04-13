@@ -12,27 +12,30 @@ import {
 
 // ===== API: HUVUDLAGER =====
 async function apiLoadWarehouse() {
-  const r = await fetch("/api/warehouse-get");
-  if (!r.ok) throw new Error("Kunde inte läsa huvudlager");
-  return await r.json();
+  const r = await fetch("/api/warehouse");
+  if (!r.ok) throw new Error("Kunde inte läsa lager");
+  const data = await r.json();
+  return Array.isArray(data) ? data : [];
 }
 
 async function apiSaveWarehouse(items) {
-  const r = await fetch("/api/warehouse-set", {
+  const r = await fetch("/api/warehouse", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ items }),
   });
-  if (!r.ok) throw new Error("Kunde inte spara huvudlager");
+  if (!r.ok) throw new Error("Kunde inte spara lager");
 }
 // ===== API: ISSUED =====
 async function apiLoadIssued(teamId) {
-  const r = await fetch(`/api/issued-get?teamId=${encodeURIComponent(teamId)}`);
+  const r = await fetch(`/api/issued?teamId=${encodeURIComponent(teamId)}`);
   if (!r.ok) throw new Error("Kunde inte läsa issued");
-  return await r.json(); // array
+  const data = await r.json();
+  return Array.isArray(data) ? data : [];
 }
+
 async function apiSaveIssued(teamId, items) {
-  const r = await fetch("/api/issued-set", {
+  const r = await fetch("/api/issued", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ teamId, items }),
@@ -42,12 +45,13 @@ async function apiSaveIssued(teamId, items) {
 
 // ===== API: BUDGET =====
 async function apiLoadBudget(teamId) {
-  const r = await fetch(`/api/budget-get?teamId=${encodeURIComponent(teamId)}`);
+  const r = await fetch(`/api/budget?teamId=${encodeURIComponent(teamId)}`);
   if (!r.ok) throw new Error("Kunde inte läsa budget");
-  return await r.json(); // object
+  return await r.json(); // objekt
 }
+
 async function apiSaveBudget(teamId, budget) {
-  const r = await fetch("/api/budget-set", {
+  const r = await fetch("/api/budget", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ teamId, budget }),
@@ -57,18 +61,21 @@ async function apiSaveBudget(teamId, budget) {
 
 // ===== API: ORDERS =====
 async function apiLoadOrders(teamId) {
-  const r = await fetch(`/api/orders-get?teamId=${encodeURIComponent(teamId)}`);
+  const r = await fetch(`/api/orders?teamId=${encodeURIComponent(teamId)}`);
   if (!r.ok) throw new Error("Kunde inte läsa orders");
-  return await r.json(); // array
+  const data = await r.json();
+  return Array.isArray(data) ? data : [];
 }
+
 async function apiSaveOrders(teamId, items) {
-  const r = await fetch("/api/orders-set", {
+  const r = await fetch("/api/orders", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ teamId, items }),
   });
   if (!r.ok) throw new Error("Kunde inte spara orders");
 }
+
 /* ================= Utilities ================= */
 const uuid = () =>
   globalThis.crypto?.randomUUID
@@ -277,18 +284,19 @@ function useTeams(user) {
 
 /* ================= MatchKit ================= */
 async function apiLoadMatchKit(teamId) {
-  const r = await fetch(`/api/matchkit-get?teamId=${encodeURIComponent(teamId)}`);
-  if (!r.ok) throw new Error("Kunde inte läsa matchkläder");
-  return await r.json();
+  const r = await fetch(`/api/matchkit?teamId=${encodeURIComponent(teamId)}`);
+  if (!r.ok) throw new Error("Kunde inte läsa matchkit");
+  const data = await r.json();
+  return Array.isArray(data) ? data : [];
 }
 
 async function apiSaveMatchKit(teamId, items) {
-  const r = await fetch("/api/matchkit-set", {
+  const r = await fetch("/api/matchkit", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ teamId, items }),
   });
-  if (!r.ok) throw new Error("Kunde inte spara matchkläder");
+  if (!r.ok) throw new Error("Kunde inte spara matchkit");
 }
 async function moveMatchKit(fromTeamId, toTeamId, ids) {
   const from = apiLoadMatchKit(fromTeamId);
