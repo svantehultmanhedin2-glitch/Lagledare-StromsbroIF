@@ -202,3 +202,32 @@ body{ margin:0; background: linear-gradient(180deg, #050b14, var(--bg)); color:v
   background: #e6ecf7;           /* ljus app-blå */
   font-weight: 600;
 }
+
+.iconBtn{
+  width: 36px;
+  height: 36px;
+  border-radius: 12px;
+  border: 1px solid rgba(157,179,216,.18);
+  background: rgba(15,23,42,.45);
+  color: #e6ecf7;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  padding: 0;
+}
+.iconBtn:hover{ background: rgba(30,91,191,.18); }
+.iconBtn.ok{ border-color: rgba(34,197,94,.35); }
+.iconBtn.danger{ border-color: rgba(239,68,68,.35); }
+
+.chip{
+  padding: 4px 8px;
+  border-radius: 999px;
+  font-size: 12px;
+  background: rgba(157,179,216,.10);
+  border: 1px solid rgba(157,179,216,.18);
+}
+
+.goalkeeper {
+  border-left: 4px solid #22c55e;
+}
