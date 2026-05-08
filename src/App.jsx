@@ -947,10 +947,8 @@ function WarehouseMatchkitPage({ user }) {
 
   // extras: max 1 storlek per typ
   const [extraShortsSize, setExtraShortsSize] = useState("");
-  const [extraShortsQty, setExtraShortsQty] = useState(0);
   const [extraSocksSize, setExtraSocksSize] = useState("");
-  const [extraSocksQty, setExtraSocksQty] = useState(0);
-
+ 
   // filter tröjor
   const [showGoalkeepersOnly, setShowGoalkeepersOnly] = useState(false);
   const [qNumber, setQNumber] = useState("");
@@ -1084,11 +1082,11 @@ const addManualJersey = async () => {
 
     // bygg max 2 “drag”
     const want = [];
-    if (extras?.shorts?.size && extras.shorts.qty > 0) {
-      want.push({ kind: "shorts", size: extras.shorts.size, qty: Math.floor(extras.shorts.qty) });
+    if (extras?.shorts?.size) {
+     want.push({ kind: "shorts", size: extras.shorts.size, qty: 1 });
     }
-    if (extras?.socks?.size && extras.socks.qty > 0) {
-      want.push({ kind: "socks", size: extras.socks.size, qty: Math.floor(extras.socks.qty) });
+    if (extras?.socks?.size) {
+      want.push({ kind: "socks", size: extras.socks.size, qty: 1 });
     }
 
     // kontroll lager
@@ -1370,34 +1368,24 @@ const addManualJersey = async () => {
                   </select>
 
                   {/* Shorts - max 1 storlek */}
-                  <select value={extraShortsSize} onChange={(e)=>setExtraShortsSize(e.target.value)}>
-                    <option value="">Shorts storlek</option>
-                    {stock.filter(s=>s.kind==="shorts").map(s => (
-                      <option key={s.id} value={s.size}>{s.size} ({s.qty})</option>
-                    ))}
-                  </select>
-                  <input
-                    value={extraShortsQty}
-                    inputMode="numeric"
-                    style={{ width: 70 }}
-                    onChange={(e)=>setExtraShortsQty(Math.max(0, Number(e.target.value || 0)))}
-                    placeholder="Antal"
-                  />
+<select value={extraShortsSize} onChange={(e)=>setExtraShortsSize(e.target.value)}>
+  <option value="">Shorts storlek</option>
+  {stock.filter(s=>s.kind==="shorts").map(s => (
+    <option key={s.id} value={s.size}>
+      {s.size} ({s.qty})
+    </option>
+  ))}
+</select>
 
-                  {/* Strumpor - max 1 storlek */}
-                  <select value={extraSocksSize} onChange={(e)=>setExtraSocksSize(e.target.value)}>
-                    <option value="">Strumpor storlek</option>
-                    {stock.filter(s=>s.kind==="socks").map(s => (
-                      <option key={s.id} value={s.size}>{s.size} ({s.qty})</option>
-                    ))}
-                  </select>
-                  <input
-                    value={extraSocksQty}
-                    inputMode="numeric"
-                    style={{ width: 70 }}
-                    onChange={(e)=>setExtraSocksQty(Math.max(0, Number(e.target.value || 0)))}
-                    placeholder="Antal"
-                  />
+<select value={extraSocksSize} onChange={(e)=>setExtraSocksSize(e.target.value)}>
+  <option value="">Strumpor storlek</option>
+  {stock.filter(s=>s.kind==="socks").map(s => (
+    <option key={s.id} value={s.size}>
+      {s.size} ({s.qty})
+    </option>
+  ))}
+</select>
+                
 
                   <button
                     className="iconBtn ok"
@@ -1405,13 +1393,14 @@ const addManualJersey = async () => {
                     disabled={!assignTeamId}
                     onClick={async () => {
                       const extras = {
-                        shorts: extraShortsSize && extraShortsQty > 0
-                          ? { size: extraShortsSize, qty: Math.floor(extraShortsQty) }
-                          : null,
-                        socks: extraSocksSize && extraSocksQty > 0
-                          ? { size: extraSocksSize, qty: Math.floor(extraSocksQty) }
-                          : null,
-                      };
+  shorts: extraShortsSize
+    ? { size: extraShortsSize, qty: 1 }
+    : null,
+
+  socks: extraSocksSize
+    ? { size: extraSocksSize, qty: 1 }
+    : null,
+};
 
                       const nextWarehouse = await assignJerseyWithExtras(i.id, assignTeamId, extras);
                       if (nextWarehouse) setItems(nextWarehouse);
