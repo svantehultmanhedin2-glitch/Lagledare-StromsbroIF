@@ -2432,10 +2432,8 @@ function LeaderClothesV2Page({ user, teamId }) {
     </div>
   );}
 
-/* ================= Page: Admin (hook-safe gate) ================= */
-function AdminPage(props) {
-  const { user } = props;
-
+/* ================= Page: Admin ================= */
+function AdminPage({ user, teamId }) {
   if (user.role !== "admin") {
     return (
       <div className="card">
@@ -2445,17 +2443,14 @@ function AdminPage(props) {
     );
   }
 
-  return <AdminInner {...props} />;
+  return <AdminInner user={user} teamId={teamId} />;
 }
 
 function AdminInner({ user, teamId }) {
-  /* ===================== USERS (lokalt OK tills vidare) ===================== */
+  /* ================= USERS ================= */
   const users = jget("users", []);
   const teamUsers = users.filter((u) => u.teamIds?.includes(teamId));
-  const leaders = teamUsers.filter((u) => u.role === "leader");
 
-  
-  /* ===================== ADD USER ===================== */
   const [newUserName, setNewUserName] = useState("");
   const [newUserPin, setNewUserPin] = useState("");
   const [newUserRole, setNewUserRole] = useState("leader");
@@ -2475,10 +2470,11 @@ function AdminInner({ user, teamId }) {
 
     setNewUserName("");
     setNewUserPin("");
-    alert("Användare skapad ✅ (logga ut/in för att se i listor)");
+
+    alert("Användare skapad ✅");
   };
 
-  /* ===================== CATALOG (oförändrad) ===================== */
+  /* ================= CATALOG ================= */
   const [catalog, setCatalog] = useState(loadCatalog());
   const [prodName, setProdName] = useState("");
   const [prodCat, setProdCat] = useState("");
@@ -2490,11 +2486,18 @@ function AdminInner({ user, teamId }) {
 
     const next = [
       ...catalog,
-      { id: uuid(), name: prodName.trim(), category: prodCat.trim(), price, active: true },
+      {
+        id: uuid(),
+        name: prodName.trim(),
+        category: prodCat.trim(),
+        price,
+        active: true,
+      },
     ];
 
     setCatalog(next);
     saveCatalog(next);
+
     setProdName("");
     setProdCat("");
     setProdPrice("");
@@ -2514,42 +2517,37 @@ function AdminInner({ user, teamId }) {
     saveCatalog(next);
   };
 
-  
+  /* ================= RENDER ================= */
+  return (
+    <div>
 
-{/* ==== AVDELSARE: ADMINISTRERA ALLA LAG ==== */}
-<div
-  style={{
-    margin: "24px 4px 12px",
-    paddingTop: 12,
-    borderTop: "1px solid var(--border)",
-    fontWeight: 600,
-    fontSize: 14,
-    opacity: 0.8,
-  }}
->
-  Administrera alla lag
-</div>
-
-
-
-      {/* USERS */}
+      {/* ===== ANVÄNDARE ===== */}
       <div className="card">
-        <div className="card__title">Användare</div>
+        <div className="card__title">Användare – {teamId}</div>
 
         <div className="formGrid" style={{ marginTop: 10 }}>
           <div className="field">
             <span>Namn</span>
-            <input value={newUserName} onChange={(e) => setNewUserName(e.target.value)} />
+            <input
+              value={newUserName}
+              onChange={(e) => setNewUserName(e.target.value)}
+            />
           </div>
 
           <div className="field">
             <span>PIN</span>
-            <input value={newUserPin} onChange={(e) => setNewUserPin(e.target.value)} />
+            <input
+              value={newUserPin}
+              onChange={(e) => setNewUserPin(e.target.value)}
+            />
           </div>
 
           <div className="field">
             <span>Roll</span>
-            <select value={newUserRole} onChange={(e) => setNewUserRole(e.target.value)}>
+            <select
+              value={newUserRole}
+              onChange={(e) => setNewUserRole(e.target.value)}
+            >
               <option value="leader">Ledare</option>
               <option value="admin">Admin</option>
             </select>
@@ -2561,88 +2559,90 @@ function AdminInner({ user, teamId }) {
         </div>
       </div>
 
-      {/* CATALOG */}
-<div className="card">
-  <div className="card__top">
-    <div className="card__title">Ledarkläder – Katalog</div>
-  </div>
-
-  {/* === LÄGG TILL PRODUKT === */}
-  <div className="formGrid" style={{ marginTop: 10 }}>
-    <div className="field">
-      <span>Namn</span>
-      <input
-        value={prodName}
-        onChange={(e) => setProdName(e.target.value)}
-        placeholder="T.ex. Träningsjacka"
-      />
-    </div>
-
-    <div className="field">
-      <span>Kategori</span>
-      <select
-        className="input"
-        value={prodCat}
-        onChange={(e) => setProdCat(e.target.value)}
-      >
-        <option value="">Välj kategori</option>
-        <option value="Startpaket">Startpaket</option>
-        <option value="Vartannat år">Vartannat år</option>
-        <option value="Tillval">Tillval</option>
-      </select>
-    </div>
-
-    <div className="field">
-      <span>Pris (kr)</span>
-      <input
-        value={prodPrice}
-        onChange={(e) => setProdPrice(e.target.value)}
-        inputMode="numeric"
-        placeholder="T.ex. 799"
-      />
-    </div>
-
-    <button className="btn btn--primary" onClick={addCatalogItem}>
-      Lägg till produkt
-    </button>
-  </div>
-
-  {/* === LISTA PRODUKTER === */}
-  <div className="history" style={{ marginTop: 12 }}>
-    {catalog.length === 0 && (
-      <div className="empty">Inga produkter i katalogen ännu.</div>
-    )}
-
-    {catalog.map((p) => (
-      <div key={p.id} className="historyRow">
-        <div>
-          <div className="historyRow__title">
-            {p.name} · {p.price} kr
-          </div>
-          <div className="historyRow__sub">
-            {p.category} · {p.active ? "Aktiv" : "Inaktiv"}
-          </div>
+      {/* ===== KATALOG FÖR LEDARKLÄDER ===== */}
+      <div className="card">
+        <div className="card__top">
+          <div className="card__title">Ledarkläder – Katalog</div>
         </div>
 
-        <div style={{ display: "flex", gap: 8 }}>
-          <button
-            className="btn btn--ghost"
-            onClick={() => toggleCatalog(p.id)}
-          >
-            {p.active ? "Inaktivera" : "Aktivera"}
-          </button>
+        {/* Lägg till produkt */}
+        <div className="formGrid" style={{ marginTop: 10 }}>
+          <div className="field">
+            <span>Namn</span>
+            <input
+              value={prodName}
+              onChange={(e) => setProdName(e.target.value)}
+              placeholder="T.ex. Halvzip"
+            />
+          </div>
 
-          <button
-            className="btn btn--danger"
-            onClick={() => removeCatalog(p.id)}
-          >
-            Ta bort
+          <div className="field">
+            <span>Kategori</span>
+            <select
+              value={prodCat}
+              onChange={(e) => setProdCat(e.target.value)}
+            >
+              <option value="">Välj kategori</option>
+              <option value="Startpaket">Startpaket</option>
+              <option value="Vartannat år">Vartannat år</option>
+              <option value="Tillval">Tillval</option>
+            </select>
+          </div>
+
+          <div className="field">
+            <span>Pris (valfritt)</span>
+            <input
+              value={prodPrice}
+              onChange={(e) => setProdPrice(e.target.value)}
+              inputMode="numeric"
+              placeholder="T.ex. 599"
+            />
+          </div>
+
+          <button className="btn btn--primary" onClick={addCatalogItem}>
+            Lägg till produkt
           </button>
+        </div>
+
+        {/* Lista produkter */}
+        <div className="history" style={{ marginTop: 12 }}>
+          {catalog.length === 0 && (
+            <div className="empty">Inga produkter ännu</div>
+          )}
+
+          {catalog.map((p) => (
+            <div key={p.id} className="historyRow">
+              <div>
+                <div className="historyRow__title">
+                  {p.name} {p.price ? `· ${p.price} kr` : ""}
+                </div>
+                <div className="historyRow__sub">
+                  {p.category} · {p.active ? "Aktiv" : "Inaktiv"}
+                </div>
+              </div>
+
+              <div style={{ display: "flex", gap: 8 }}>
+                <button
+                  className="btn btn--ghost"
+                  onClick={() => toggleCatalog(p.id)}
+                >
+                  {p.active ? "Inaktivera" : "Aktivera"}
+                </button>
+
+                <button
+                  className="btn btn--danger"
+                  onClick={() => removeCatalog(p.id)}
+                >
+                  Ta bort
+                </button>
+              </div>
+            </div>
+          ))}
         </div>
       </div>
-    ))}
-  </div>
-</div>
+
+    </div>
+  );
 }
 
 /* ================= Page: Teamcash (Upstash) ================= */
