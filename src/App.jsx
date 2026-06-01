@@ -1352,8 +1352,8 @@ const addManualJersey = async () => {
                   onClick={() => {
                     setAssigningId(i.id);
                     setAssignTeamId("");
-                    setExtraShortsSize(""); setExtraShortsQty(0);
-                    setExtraSocksSize("");  setExtraSocksQty(0);
+                    setExtraShortsSize("");
+                    setExtraSocksSize("");
                   }}
                 >
                   Tilldela
@@ -1407,8 +1407,8 @@ const addManualJersey = async () => {
 
                       setAssigningId(null);
                       setAssignTeamId("");
-                      setExtraShortsSize(""); setExtraShortsQty(0);
-                      setExtraSocksSize("");  setExtraSocksQty(0);
+                      setExtraShortsSize("");
+                      setExtraSocksSize("");
                     }}
                   >✅</button>
 
@@ -1418,8 +1418,8 @@ const addManualJersey = async () => {
                     onClick={() => {
                       setAssigningId(null);
                       setAssignTeamId("");
-                      setExtraShortsSize(""); setExtraShortsQty(0);
-                      setExtraSocksSize("");  setExtraSocksQty(0);
+                      setExtraShortsSize("");
+                      setExtraSocksSize("");
                     }}
                   >✖️</button>
                 </div>
@@ -1518,12 +1518,7 @@ const filteredItems = useMemo(() => {
     await persist(next);
   };
 
-  // Admin: ta bort tröja från lagets matchkit
-  const removeItem = async (id) => {
-    if (!isAdmin) return;
-    const next = items.filter((i) => i.id !== id);
-    await persist(next);
-  };
+ 
 
   // Admin: flytta markerade tröjor mellan lag (via API)
   const moveMatchKitBetweenTeams = async (fromTeamId, toTeamId, ids) => {
@@ -1571,37 +1566,63 @@ const filteredItems = useMemo(() => {
   };
 
   // Admin: returnera en tröja till huvudlager (warehouse)
- const returnToWarehouse = async (itemId) => {
+const returnToWarehouse = async (itemId) => {
   if (!isAdmin) return;
 
-  const it = items.find(x => x.id === itemId);
+  const it = items.find((x) => x.id === itemId);
   if (!it) return;
 
   if (!confirm("Returnera tröjan till huvudlager?")) return;
   const alsoReturnExtras = confirm("Returnera även shorts/strumpor till huvudlager?");
 
-  // 1) ta bort från lagets matchkit
+  // 1) Ta bort från lagets matchkit
   const nextTeam = items.filter((x) => x.id !== itemId);
   setItems(nextTeam);
   await apiSaveMatchKit(teamId, nextTeam);
 
-  // 2) uppdatera huvudlager
+  // 2) Hämta huvudlager
   let warehouse = normalizeWarehouse(await apiLoadWarehouse());
 
-  // tröjan tillbaka till available
-  warehouse = warehouse.map((x) =>
-    x.type === "jersey" && x.id === itemId ? { ...x, status: "available", teamId: null } : x
+  // Kolla om tröjan redan finns i huvudlager
+  const jerseyExists = warehouse.some(
+    (x) => x.type === "jersey" && x.id === itemId
   );
 
-  // extras tillbaka till stock
+  if (jerseyExists) {
+    // Finns redan -> markera som tillgänglig igen
+    warehouse = warehouse.map((x) =>
+      x.type === "jersey" && x.id === itemId
+        ? { ...x, status: "available", teamId: null }
+        : x
+    );
+  } else {
+    // Finns inte -> lägg tillbaka som ny tröja i huvudlager
+    warehouse = [
+      {
+        id: it.id,
+        type: "jersey",
+        number: it.number,
+        size: it.size,
+        position: it.position ?? "outfield",
+        status: "available",
+        teamId: null,
+        note: "",
+        createdAt: new Date().toISOString(),
+      },
+      ...warehouse,
+    ];
+  }
+
+  // 3) Lägg tillbaka extras i stock om admin valt det
   if (alsoReturnExtras) {
     const shorts = it.extras?.shorts;
-    const socks  = it.extras?.socks;
+    const socks = it.extras?.socks;
 
     if (shorts?.qty && shorts?.size) {
       const res = adjustStock(warehouse, "shorts", shorts.size, +Number(shorts.qty));
       warehouse = res.next;
     }
+
     if (socks?.qty && socks?.size) {
       const res = adjustStock(warehouse, "socks", socks.size, +Number(socks.qty));
       warehouse = res.next;
@@ -1719,14 +1740,20 @@ const filteredItems = useMemo(() => {
 
            {isAdmin && (
   <div style={{ display:"flex", gap:8, justifyContent:"flex-end", marginTop: 10 }}>
-    <button className="iconBtn" title="Frigör (ta bort spelare)" onClick={() => updateItem(it.id, { playerName: "" })}>
+    <button
+      className="iconBtn"
+      title="Frigör (ta bort spelare)"
+      onClick={() => updateItem(it.id, { playerName: "" })}
+    >
       🧹
     </button>
-    <button className="iconBtn" title="Returnera till huvudlager" onClick={() => returnToWarehouse(it.id)}>
+
+    <button
+      className="iconBtn"
+      title="Returnera till huvudlager"
+      onClick={() => returnToWarehouse(it.id)}
+    >
       ↩️
-    </button>
-    <button className="iconBtn danger" title="Ta bort" onClick={() => removeItem(it.id)}>
-      🗑️
     </button>
   </div>
 )}
