@@ -2820,9 +2820,9 @@ function TeamCashPage({ user, teamId }) {
   );
 }
 
-/* ================= Page: Reports (Upstash for lagkassa) ================= */
-function ReportsPage(props) {
-  const { user } = props;
+/* ================= Page: Reports ================= */
+
+function ReportsPage({ user, teamId, teamsAll }) {
   if (user.role !== "admin") {
     return (
       <div className="card">
@@ -2831,42 +2831,93 @@ function ReportsPage(props) {
       </div>
     );
   }
-  return <ReportsInner {...props} />;
+
+  return <ReportsInner user={user} teamId={teamId} teamsAll={teamsAll} />;
 }
 
 function ReportsInner({ user, teamId, teamsAll }) {
   const team = teamsAll.find((t) => t.id === teamId);
-  const [mkRowsAll, setMkRowsAll] = useState([]);
+
   const [scope, setScope] = useState("team"); // "team" | "all"
+  const date = new Date().toISOString().slice(0, 10);
+
+  /* =========================
+     LAGKASSA (oförändrad)
+  ========================= */
+
   const [cashRowsAll, setCashRowsAll] = useState([]);
-  const [cash, setCash] = useState(null);
-  const [cashHist, setCashHist] = useState([]);
 
   useEffect(() => {
+    if (scope !== "all") return;
+
     let alive = true;
-    apiCashSnapshot(teamId).then(({ cash, hist }) => {
-      if (!alive) return;
-      setCash(cash);
-      setCashHist(Array.isArray(hist) ? hist : []);
-    });
+
+    (async () => {
+      const rows = [];
+
+      for (const t of teamsAll) {
+        const { cash, hist } = await apiCashSnapshot(t.id);
+
+        (hist ?? []).forEach((h) => {
+          rows.push({
+            Lag: t.name,
+            Kontonummer: cash?.accountNumber ?? "",
+            Månad: String(h.month),
+            Saldo: h.balance,
+          });
+        });
+      }
+
+      if (alive) setCashRowsAll(rows);
+    })();
+
     return () => {
       alive = false;
     };
-  }, [teamId]);
+  }, [scope, teamsAll]);
 
-  useEffect(() => {
-  let alive = true;
+  /* =========================
+     LEDARKLÄDER (NY LOGIK)
+  ========================= */
 
-  if (scope !== "all") return;
-
-  (async () => {
+  async function buildLeaderClothesRows(scope) {
     const rows = [];
 
-    for (const t of teamsAll) {
-      const kit = await apiLoadMatchKit(t.id);
-      const safeKit = Array.isArray(kit) ? kit : [];
+    const targets = scope === "all" ? teamsAll : [team];
 
-      safeKit.forEach((m) => {
+    for (const t of targets) {
+      const issued = await apiLoadIssued(t.id);
+
+      (issued ?? []).forEach((entry) => {
+        entry.items?.forEach((item) => {
+          rows.push({
+            Lag: t.name,
+            Ledare: entry.leaderName,
+            Plagg: item.name,
+            Antal: item.quantity ?? 1,
+            Datum: new Date(entry.createdAt).toLocaleDateString(),
+            Källa: entry.source,
+          });
+        });
+      });
+    }
+
+    return rows;
+  }
+
+  /* =========================
+     MATCHKLÄDER
+  ========================= */
+
+  async function buildMatchKitRows(scope) {
+    const rows = [];
+
+    const targets = scope === "all" ? teamsAll : [team];
+
+    for (const t of targets) {
+      const kit = await apiLoadMatchKit(t.id);
+
+      (kit ?? []).forEach((m) => {
         rows.push({
           Lag: t.name,
           Nummer: m.number,
@@ -2876,143 +2927,40 @@ function ReportsInner({ user, teamId, teamsAll }) {
       });
     }
 
-    if (alive) setMkRowsAll(rows);
-  })();
-
-  return () => {
-    alive = false;
-  };
-}, [scope, teamsAll]);
-useEffect(() => {
-  if (scope !== "all") return;
-
-  let alive = true;
-
-  (async () => {
-    const rows = [];
-
-    for (const t of teamsAll) {
-      const { cash, hist } = await apiCashSnapshot(t.id);
-
-      (hist ?? []).forEach((h) => {
-        rows.push({
-          Lag: t.name,
-          Kontonummer: cash?.accountNumber ?? "",
-          Månad: String(h.month),            // samma som valt lag
-          Saldo: h.balance,
-          Importerad: h.importedAt
-            ? new Date(h.importedAt).toLocaleDateString()
-            : "",
-        });
-      });
-    }
-
-    if (alive) setCashRowsAll(rows);
-  })();
-
-  return () => {
-    alive = false;
-  };
-}, [scope, teamsAll]);
-  const date = new Date().toISOString().slice(0, 10);
-
-  /* =========================
-     LAGKASSA
-  ========================= */
-
-  const cashRows = cashHist.map((h) => ({
-    Lag: team?.name ?? teamId,
-    Kontonummer: cash?.accountNumber ?? "",
-    Månad: String(h.month),
-    Saldo: h.balance,
-    Importerad: h.importedAt
-      ? new Date(h.importedAt).toLocaleDateString()
-      : "",
-  }));
-
-
-
-  /* =========================
-     LEDARKLÄDER
-  ========================= */
-
-  const issued = loadIssued(teamId);
-  const issuedRows = issued.map((i) => ({
-    Lag: team?.name ?? teamId,
-    Ledare: i.leaderName,
-    Plagg: i.name,
-    Storlek: i.size,
-    Antal: i.quantity,
-    Datum: i.dateIssued,
-    Kostnad: i.cost,
-    Källa: i.source,
-  }));
-
-  const issuedRowsAll = useMemo(() => {
-    const rows = [];
-    for (const t of teamsAll) {
-      const issued = loadIssued(t.id) ?? [];
-      issued.forEach((i) => {
-        rows.push({
-          Lag: t.name,
-          Ledare: i.leaderName,
-          Plagg: i.name,
-          Storlek: i.size,
-          Antal: i.quantity,
-          Datum: i.dateIssued,
-          Kostnad: i.cost,
-          Källa: i.source,
-        });
-      });
-    }
     return rows;
-  }, [teamsAll]);
+  }
 
   /* =========================
-     BESTÄLLNINGAR
+     EXPORT
   ========================= */
 
-  const orders = loadOrders(teamId) ?? [];
-  const orderRows = orders.map((o) => ({
-    Lag: team?.name ?? teamId,
-    Beställare: o.createdByName,
-    Datum: new Date(o.createdAt).toLocaleString(),
-    Totalt: o.totalCost,
-    Status: o.status,
-  }));
+  const exportLeaderClothes = async () => {
+    const rows = await buildLeaderClothesRows(scope);
 
-  const orderRowsAll = useMemo(() => {
-    const rows = [];
-    for (const t of teamsAll) {
-      const orders = loadOrders(t.id) ?? [];
-      orders.forEach((o) => {
-        rows.push({
-          Lag: t.name,
-          Beställare: o.createdByName,
-          Datum: new Date(o.createdAt).toLocaleString(),
-          Totalt: o.totalCost,
-          Status: o.status,
-        });
-      });
-    }
-    return rows;
-  }, [teamsAll]);
+    exportXlsx(
+      "Ledarkläder",
+      rows,
+      `ledarklader-${scope === "all" ? "alla-lag" : teamId}-${date}.xlsx`
+    );
+  };
 
-  /* =========================
-     MATCHKLÄDER
-  ========================= */
+  const exportMatchKit = async () => {
+    const rows = await buildMatchKitRows(scope);
 
-  const matchKit = apiLoadMatchKit(teamId);
-  const safeMatchKit = Array.isArray(matchKit) ? matchKit : [];
+    exportXlsx(
+      "Matchkläder",
+      rows,
+      `matchklader-${scope === "all" ? "alla-lag" : teamId}-${date}.xlsx`
+    );
+  };
 
-  const mkRows = safeMatchKit.map((m) => ({
-    Lag: team?.name ?? teamId,
-    Nummer: m.number,
-    Storlek: m.size,
-    Spelare: m.playerName ?? "",
-  }));
-
-
+  const exportCash = () => {
+    exportXlsx(
+      "Lagkassa",
+      scope === "all" ? cashRowsAll : [],
+      `lagkassa-${scope === "all" ? "alla-lag" : teamId}-${date}.xlsx`
+    );
+  };
 
   /* =========================
      RENDER
@@ -3023,10 +2971,10 @@ useEffect(() => {
       <div className="card">
         <div className="card__top">
           <div className="card__title">Rapporter</div>
-          <Pill tone="neutral">{team?.name ?? teamId}</Pill>
+          <span className="pill">{team?.name ?? teamId}</span>
         </div>
 
-        <div className="field">
+        <div className="field" style={{ marginTop: 10 }}>
           <span>Omfattning</span>
           <select
             className="input"
@@ -3038,60 +2986,22 @@ useEffect(() => {
           </select>
         </div>
 
-        <div className="btnRow">
-          <button
-            className="btn btn--primary"
-            onClick={() =>
-              exportXlsx(
-                "Lagkassa",
-                scope === "all" ? cashRowsAll : cashRows,
-                `lagkassa-${scope === "all" ? "alla-lag" : teamId}-${date}.xlsx`
-              )
-            }
-          >
-            Export Lagkassa
+        <div className="btnRow" style={{ marginTop: 12 }}>
+          <button className="btn btn--primary" onClick={exportLeaderClothes}>
+            Export Ledarkläder
           </button>
 
-          <button
-            className="btn btn--primary"
-            onClick={() =>
-              exportXlsx(
-                "Ledarkläder",
-                scope === "all" ? issuedRowsAll : issuedRows,
-                `ledarklader-${scope === "all" ? "alla-lag" : teamId}-${date}.xlsx`
-              )
-            }
-          >
-            Export Ledarkläder
+          <button className="btn btn--primary" onClick={exportMatchKit}>
+            Export Matchkläder
+          </button>
+
+          <button className="btn btn--ghost" onClick={exportCash}>
+            Export Lagkassa
           </button>
         </div>
 
-        <div className="btnRow">
-          <button
-            className="btn btn--ghost"
-            onClick={() =>
-              exportXlsx(
-                "Orders",
-                scope === "all" ? orderRowsAll : orderRows,
-                `orders-${scope === "all" ? "alla-lag" : teamId}-${date}.xlsx`
-              )
-            }
-          >
-            Export Beställningar
-          </button>
-
-          <button
-            className="btn btn--ghost"
-            onClick={() =>
-              exportXlsx(
-                "Matchkläder",
-                scope === "all" ? mkRowsAll : mkRows,
-                `matchklader-${scope === "all" ? "alla-lag" : teamId}-${date}.xlsx`
-              )
-            }
-          >
-            Export Matchkläder
-          </button>
+        <div className="muted" style={{ marginTop: 10, fontSize: 12 }}>
+          Ledarkläder exporteras nu som rekvisitioner per ledare (ny struktur).
         </div>
       </div>
     </div>
