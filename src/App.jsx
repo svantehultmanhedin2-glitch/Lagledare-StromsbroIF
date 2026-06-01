@@ -931,30 +931,31 @@ function NotificationsPage({ user }) {
 
 
 
-/** Import till huvudlager */
-
-/** UI: Admin‑vy för huvudlager */
 function WarehouseMatchkitPage({ user }) {
   const fileRef = useRef(null);
 
-  // hooks alltid överst (viktigt!)
   const [items, setItems] = useState([]);
   const [importMode, setImportMode] = useState("append");
 
-  // tilldelning
+  // enkel tilldelning
   const [assigningId, setAssigningId] = useState(null);
   const [assignTeamId, setAssignTeamId] = useState("");
-const [selectedJerseyIds, setSelectedJerseyIds] = useState([]);
-const [bulkAssignTeamId, setBulkAssignTeamId] = useState("");
-
-  // extras: max 1 storlek per typ
   const [extraShortsSize, setExtraShortsSize] = useState("");
   const [extraSocksSize, setExtraSocksSize] = useState("");
- 
-  // filter tröjor
+
+  // filter
   const [showGoalkeepersOnly, setShowGoalkeepersOnly] = useState(false);
   const [qNumber, setQNumber] = useState("");
   const [qSize, setQSize] = useState("all");
+
+  // batch
+  const [selectedJerseyIds, setSelectedJerseyIds] = useState([]);
+  const [bulkAssignTeamId, setBulkAssignTeamId] = useState("");
+  const [bulkShortsSize, setBulkShortsSize] = useState("");
+  const [bulkSocksSize, setBulkSocksSize] = useState("");
+
+  // vilket verktyg som är öppet
+  const [activeToolPanel, setActiveToolPanel] = useState(null); // null | "batch" | "import" | "stock"
 
   useEffect(() => {
     apiLoadWarehouse().then((w) => setItems(normalizeWarehouse(w)));
@@ -976,59 +977,60 @@ const [bulkAssignTeamId, setBulkAssignTeamId] = useState("");
     return Array.from(set).sort((a, b) => a.localeCompare(b, "sv"));
   }, [jerseys]);
 
-const filteredJerseys = useMemo(() => {
-  const numberQuery = qNumber.trim();
+  const filteredJerseys = useMemo(() => {
+    const numberQuery = qNumber.trim();
 
-  return jerseys.filter((i) => {
-    if (numberQuery && !String(i.number).includes(numberQuery)) return false;
-    if (qSize !== "all" && i.size !== qSize) return false;
+    return jerseys.filter((i) => {
+      if (numberQuery && !String(i.number).includes(numberQuery)) return false;
+      if (qSize !== "all" && i.size !== qSize) return false;
+      if (showGoalkeepersOnly && i.position !== "goalkeeper") return false;
+      return true;
+    });
+  }, [jerseys, qNumber, qSize, showGoalkeepersOnly]);
 
-    // ✅ NYTT FILTER
-    if (showGoalkeepersOnly && i.position !== "goalkeeper") return false;
-
-    return true;
-  });
-}, [jerseys, qNumber, qSize, showGoalkeepersOnly]);
-
-  const availableCount = jerseys.filter(j => j.status === "available").length;
+  const availableCount = jerseys.filter((j) => j.status === "available").length;
 
   const reload = async () => {
     const w = await apiLoadWarehouse();
     setItems(normalizeWarehouse(w));
   };
 
-const toggleSelectedJersey = (id) => {
-  setSelectedJerseyIds((prev) =>
-    prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]
-  );
-};
+  const toggleToolPanel = (panel) => {
+    setActiveToolPanel((prev) => (prev === panel ? null : panel));
+  };
 
-const clearSelectedJerseys = () => {
-  setSelectedJerseyIds([]);
-};
-
-const availableFilteredIds = filteredJerseys
-  .filter((j) => j.status === "available")
-  .map((j) => j.id);
-
-const allVisibleAvailableSelected =
-  availableFilteredIds.length > 0 &&
-  availableFilteredIds.every((id) => selectedJerseyIds.includes(id));
-
-const toggleSelectAllVisible = () => {
-  if (allVisibleAvailableSelected) {
+  // ===== batch-markering =====
+  const toggleSelectedJersey = (id) => {
     setSelectedJerseyIds((prev) =>
-      prev.filter((id) => !availableFilteredIds.includes(id))
+      prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]
     );
-  } else {
-    setSelectedJerseyIds((prev) => [
-      ...new Set([...prev, ...availableFilteredIds]),
-    ]);
-  }
-};
+  };
 
+  const clearSelectedJerseys = () => {
+    setSelectedJerseyIds([]);
+  };
 
-  // import tröjor till huvudlager (Excel)
+  const visibleAvailableIds = filteredJerseys
+    .filter((j) => j.status === "available")
+    .map((j) => j.id);
+
+  const allVisibleAvailableSelected =
+    visibleAvailableIds.length > 0 &&
+    visibleAvailableIds.every((id) => selectedJerseyIds.includes(id));
+
+  const toggleSelectAllVisible = () => {
+    if (allVisibleAvailableSelected) {
+      setSelectedJerseyIds((prev) =>
+        prev.filter((id) => !visibleAvailableIds.includes(id))
+      );
+    } else {
+      setSelectedJerseyIds((prev) => [
+        ...new Set([...prev, ...visibleAvailableIds]),
+      ]);
+    }
+  };
+
+  // ===== import =====
   const importWarehouseExcel = async (file, mode) => {
     const parsed = await parseMatchkitExcel(file);
 
@@ -1038,6 +1040,31 @@ const toggleSelectAllVisible = () => {
         type: "jersey",
         number: Number(row.Nummer ?? row.nummer ?? row.number),
         size: String(row.Storlek ?? row.storlek ?? row.size ?? "").trim(),
+        position:
+          String(
+            row.position ??
+              row.Position ??
+              row.typ ??
+              row.Typ ??
+              row.roll ??
+              row.Roll ??
+              ""
+          )
+            .toLowerCase()
+            .trim() === "målvakt" ||
+          String(
+            row.position ??
+              row.Position ??
+              row.typ ??
+              row.Typ ??
+              row.roll ??
+              row.Roll ??
+              ""
+          )
+            .toLowerCase()
+            .trim() === "goalkeeper"
+            ? "goalkeeper"
+            : "outfield",
         status: "available",
         teamId: null,
         note: "",
@@ -1050,88 +1077,84 @@ const toggleSelectAllVisible = () => {
       return 0;
     }
 
-    const next = mode === "replace"
-      ? [...incoming, ...stock] // behåll stock-rader
-      : [...normalizeWarehouse(items), ...incoming];
+    const next =
+      mode === "replace"
+        ? [...incoming, ...stock]
+        : [...normalizeWarehouse(items), ...incoming];
 
     setItems(next);
     await apiSaveWarehouse(next);
     return incoming.length;
   };
 
-  // lägg till tröja manuellt
-const addManualJersey = async () => {
-  const number = Number(prompt("Tröjnummer?"));
-  const size = (prompt("Storlek (t.ex. 152, S, M)?") || "").trim();
+  // ===== lägg till tröja =====
+  const addManualJersey = async () => {
+    const number = Number(prompt("Tröjnummer?"));
+    const size = (prompt("Storlek (t.ex. 152, S, M)?") || "").trim();
 
-  if (!Number.isFinite(number) || !size) return;
+    if (!Number.isFinite(number) || !size) return;
 
-  // ✅ ny bättre logik
-  const type = prompt(
-    "Typ av tröja?\n\n1 = Utespelare\n2 = Målvakt",
-    "1"
-  );
+    const type = prompt("Typ av tröja?\n\n1 = Utespelare\n2 = Målvakt", "1");
+    if (!type) return;
 
-  if (!type) return;
+    const isKeeper = type === "2";
 
-  const isKeeper = type === "2";
+    const next = [
+      {
+        id: uuid(),
+        type: "jersey",
+        number,
+        size,
+        position: isKeeper ? "goalkeeper" : "outfield",
+        status: "available",
+        teamId: null,
+        createdAt: new Date().toISOString(),
+      },
+      ...normalizeWarehouse(items),
+    ];
 
-  const next = [
-    {
-      id: uuid(),
-      type: "jersey",
-      number,
-      size,
-      position: isKeeper ? "goalkeeper" : "outfield",
-      status: "available",
-      teamId: null,
-      createdAt: new Date().toISOString(),
-    },
-    ...normalizeWarehouse(items),
-  ];
-
-  setItems(next);
-  await apiSaveWarehouse(next);
-};
-
-
-  // ta bort tröja (bara om available)
-  const removeJersey = async (id) => {
-    const next = normalizeWarehouse(items).filter((x) => !(x.type === "jersey" && x.id === id));
     setItems(next);
     await apiSaveWarehouse(next);
   };
 
-  // logik: tilldela tröja + extras (max 1 per typ)
+  // ===== ta bort tröja från huvudlager =====
+  const removeJersey = async (id) => {
+    const next = normalizeWarehouse(items).filter(
+      (x) => !(x.type === "jersey" && x.id === id)
+    );
+    setItems(next);
+    await apiSaveWarehouse(next);
+  };
+
+  // ===== enkel tilldelning =====
   async function assignJerseyWithExtras(jerseyId, teamId, extras) {
     const warehouse = normalizeWarehouse(await apiLoadWarehouse());
     const { jerseys, stock } = splitWarehouse(warehouse);
 
-    const jersey = jerseys.find(j => j.id === jerseyId);
+    const jersey = jerseys.find((j) => j.id === jerseyId);
     if (!jersey || jersey.status !== "available") {
       alert("Tröjan är inte tillgänglig");
       return null;
     }
 
-    // bygg max 2 “drag”
     const want = [];
     if (extras?.shorts?.size) {
-     want.push({ kind: "shorts", size: extras.shorts.size, qty: 1 });
+      want.push({ kind: "shorts", size: extras.shorts.size, qty: 1 });
     }
     if (extras?.socks?.size) {
       want.push({ kind: "socks", size: extras.socks.size, qty: 1 });
     }
 
-    // kontroll lager
     for (const w of want) {
       const have = getStockQty(stock, w.kind, w.size);
       if (have < w.qty) {
-        alert(`Inte tillräckligt i lager: ${kindLabel(w.kind)} ${w.size} (har ${have}, behöver ${w.qty})`);
+        alert(
+          `Inte tillräckligt i lager: ${kindLabel(w.kind)} ${w.size} (har ${have}, behöver ${w.qty})`
+        );
         return null;
       }
     }
 
-    // dra lager
     let nextWarehouse = warehouse;
     for (const w of want) {
       const res = adjustStock(nextWarehouse, w.kind, w.size, -w.qty);
@@ -1142,14 +1165,12 @@ const addManualJersey = async () => {
       nextWarehouse = res.next;
     }
 
-    // markera tröja assigned
     nextWarehouse = nextWarehouse.map((x) =>
       x.type === "jersey" && x.id === jerseyId
         ? { ...x, status: "assigned", teamId }
         : x
     );
 
-    // skapa matchkit-post med extras
     const teamItemsRaw = await apiLoadMatchKit(teamId);
     const teamItems = normalizeMatchkit(teamItemsRaw);
 
@@ -1161,12 +1182,14 @@ const addManualJersey = async () => {
       size: jersey.size,
       playerName: "",
       extras: {
-        shorts: extras?.shorts?.size && extras.shorts.qty > 0
-          ? { size: extras.shorts.size, qty: Math.floor(extras.shorts.qty) }
-          : null,
-        socks: extras?.socks?.size && extras.socks.qty > 0
-          ? { size: extras.socks.size, qty: Math.floor(extras.socks.qty) }
-          : null,
+        shorts:
+          extras?.shorts?.size && extras.shorts.qty > 0
+            ? { size: extras.shorts.size, qty: Math.floor(extras.shorts.qty) }
+            : null,
+        socks:
+          extras?.socks?.size && extras.socks.qty > 0
+            ? { size: extras.socks.size, qty: Math.floor(extras.socks.qty) }
+            : null,
       },
     };
 
@@ -1175,311 +1198,524 @@ const addManualJersey = async () => {
 
     return nextWarehouse;
   }
-async function assignMultipleJerseysToTeam(teamId, jerseyIds) {
-  const ids = Array.isArray(jerseyIds) ? jerseyIds : [];
 
-  if (!teamId) {
-    alert("Välj ett lag först.");
-    return null;
+  // ===== batch-tilldelning med extras =====
+  async function assignMultipleJerseysWithExtras(teamId, jerseyIds, extras) {
+    const ids = Array.isArray(jerseyIds) ? jerseyIds : [];
+
+    if (!teamId) {
+      alert("Välj ett lag först.");
+      return null;
+    }
+
+    if (ids.length === 0) {
+      alert("Markera minst en tröja.");
+      return null;
+    }
+
+    const warehouse = normalizeWarehouse(await apiLoadWarehouse());
+    const { jerseys, stock } = splitWarehouse(warehouse);
+
+    const selectedJerseys = jerseys.filter((j) => ids.includes(j.id));
+
+    if (selectedJerseys.length !== ids.length) {
+      alert("Några markerade tröjor kunde inte hittas.");
+      return null;
+    }
+
+    const unavailable = selectedJerseys.filter((j) => j.status !== "available");
+    if (unavailable.length > 0) {
+      alert("En eller flera markerade tröjor är inte längre tillgängliga.");
+      return null;
+    }
+
+    const shortsQtyNeeded = extras?.shorts?.size ? ids.length : 0;
+    const socksQtyNeeded = extras?.socks?.size ? ids.length : 0;
+
+    if (shortsQtyNeeded > 0) {
+      const haveShorts = getStockQty(stock, "shorts", extras.shorts.size);
+      if (haveShorts < shortsQtyNeeded) {
+        alert(
+          `Inte tillräckligt med shorts i lager (${extras.shorts.size}). Har ${haveShorts}, behöver ${shortsQtyNeeded}.`
+        );
+        return null;
+      }
+    }
+
+    if (socksQtyNeeded > 0) {
+      const haveSocks = getStockQty(stock, "socks", extras.socks.size);
+      if (haveSocks < socksQtyNeeded) {
+        alert(
+          `Inte tillräckligt med strumpor i lager (${extras.socks.size}). Har ${haveSocks}, behöver ${socksQtyNeeded}.`
+        );
+        return null;
+      }
+    }
+
+    let nextWarehouse = warehouse;
+
+    if (shortsQtyNeeded > 0) {
+      const res = adjustStock(
+        nextWarehouse,
+        "shorts",
+        extras.shorts.size,
+        -shortsQtyNeeded
+      );
+      if (!res.ok) {
+        alert("Kunde inte dra shorts från lager.");
+        return null;
+      }
+      nextWarehouse = res.next;
+    }
+
+    if (socksQtyNeeded > 0) {
+      const res = adjustStock(
+        nextWarehouse,
+        "socks",
+        extras.socks.size,
+        -socksQtyNeeded
+      );
+      if (!res.ok) {
+        alert("Kunde inte dra strumpor från lager.");
+        return null;
+      }
+      nextWarehouse = res.next;
+    }
+
+    nextWarehouse = nextWarehouse.map((x) =>
+      x.type === "jersey" && ids.includes(x.id)
+        ? { ...x, status: "assigned", teamId }
+        : x
+    );
+
+    const teamItemsRaw = await apiLoadMatchKit(teamId);
+    const teamItems = normalizeMatchkit(teamItemsRaw);
+
+    const existingIds = new Set(teamItems.map((x) => x.id));
+
+    const newTeamItems = selectedJerseys
+      .filter((j) => !existingIds.has(j.id))
+      .map((j) => ({
+        id: j.id,
+        kind: "jersey",
+        position: j.position ?? "outfield",
+        number: j.number,
+        size: j.size,
+        playerName: "",
+        extras: {
+          shorts: extras?.shorts?.size
+            ? { size: extras.shorts.size, qty: 1 }
+            : null,
+          socks: extras?.socks?.size
+            ? { size: extras.socks.size, qty: 1 }
+            : null,
+        },
+      }));
+
+    await apiSaveMatchKit(teamId, [...newTeamItems, ...teamItems]);
+    await apiSaveWarehouse(nextWarehouse);
+
+    return {
+      nextWarehouse,
+      assignedCount: newTeamItems.length,
+      shortsAssigned: shortsQtyNeeded,
+      socksAssigned: socksQtyNeeded,
+    };
   }
 
-  if (ids.length === 0) {
-    alert("Markera minst en tröja.");
-    return null;
-  }
+  const toolBtnStyle = (active) =>
+    active
+      ? { outline: "2px solid rgba(30,91,191,.75)" }
+      : undefined;
 
-  const warehouse = normalizeWarehouse(await apiLoadWarehouse());
-  const { jerseys } = splitWarehouse(warehouse);
-
-  const selectedJerseys = jerseys.filter((j) => ids.includes(j.id));
-
-  if (selectedJerseys.length !== ids.length) {
-    alert("Några valda tröjor kunde inte hittas.");
-    return null;
-  }
-
-  const unavailable = selectedJerseys.filter((j) => j.status !== "available");
-  if (unavailable.length > 0) {
-    alert("En eller flera markerade tröjor är inte längre tillgängliga.");
-    return null;
-  }
-
-  const teamItemsRaw = await apiLoadMatchKit(teamId);
-  const teamItems = normalizeMatchkit(teamItemsRaw);
-
-  const existingIds = new Set(teamItems.map((x) => x.id));
-
-  const newTeamItems = selectedJerseys
-    .filter((j) => !existingIds.has(j.id))
-    .map((j) => ({
-      id: j.id,
-      kind: "jersey",
-      position: j.position ?? "outfield",
-      number: j.number,
-      size: j.size,
-      playerName: "",
-      extras: {
-        shorts: null,
-        socks: null,
-      },
-    }));
-
-  const nextWarehouse = warehouse.map((x) =>
-    x.type === "jersey" && ids.includes(x.id)
-      ? { ...x, status: "assigned", teamId }
-      : x
-  );
-
-  await apiSaveMatchKit(teamId, [...newTeamItems, ...teamItems]);
-  await apiSaveWarehouse(nextWarehouse);
-
-  return {
-    nextWarehouse,
-    assignedCount: newTeamItems.length,
-  };
-}
   return (
     <div>
-      <div className="summaryCard">
-        <div className="summaryTitle">Huvudlager – Matchkläder</div>
-        <div className="summaryValue">{availableCount}/{jerseys.length}</div>
-        <div className="summarySub">Tillgängliga tröjor / Totalt</div>
-      </div>
-<div className="btnRow" style={{ marginTop: 10 }}>
-
-  <button
-    className={`btn ${showGoalkeepersOnly ? "btn--ok" : "btn--ghost"}`}
-    onClick={() => setShowGoalkeepersOnly(prev => !prev)}
-  >
-    {showGoalkeepersOnly ? "Visa alla" : "Endast målvakter 🥅"}
-  </button>
-
-</div>
-      {/* STOCK: Shorts/Strumpor per storlek */}
-      <div className="card" style={{ marginTop: 12 }}>
+      {/* ===== SÖK ÖVERST ===== */}
+      <div className="card">
         <div className="card__top">
-          <div className="card__title">Shorts & Strumpor (lager per storlek)</div>
-          <Pill tone="neutral">{stock.length} rader</Pill>
-        </div>
-
-        <div className="formGrid" style={{ marginTop: 10 }}>
-          <div className="field">
-            <span>Typ</span>
-            <select id="stockKind">
-              {STOCK_KINDS.map(k => <option key={k.id} value={k.id}>{k.label}</option>)}
-            </select>
-          </div>
-
-          <div className="field">
-            <span>Storlek</span>
-            <input id="stockSize" placeholder="t.ex. 152 eller 31-33" />
-          </div>
-
-          <div className="field">
-            <span>Antal</span>
-            <input id="stockQty" inputMode="numeric" placeholder="t.ex. 10" />
-          </div>
-
-          <button
-            className="btn btn--ok"
-            onClick={async () => {
-              const kind = document.getElementById("stockKind").value;
-              const size = String(document.getElementById("stockSize").value || "").trim();
-              const qty = Number(document.getElementById("stockQty").value || 0);
-              if (!size || qty < 0) return;
-
-              const next = setStockQty(items, kind, size, qty);
-              setItems(next);
-              await apiSaveWarehouse(next);
-
-              document.getElementById("stockSize").value = "";
-              document.getElementById("stockQty").value = "";
-            }}
-          >
-            Spara
-          </button>
-        </div>
-
-        <div className="history" style={{ marginTop: 12 }}>
-          {stock
-            .slice()
-            .sort((a,b) => (a.kind+a.size).localeCompare(b.kind+b.size, "sv"))
-            .map((s) => (
-              <div key={s.id} className="historyRow">
-                <div>
-                  <div className="historyRow__title">{kindLabel(s.kind)} · {s.size}</div>
-                  <div className="historyRow__sub">I lager: <strong>{s.qty}</strong></div>
-                </div>
-                <div style={{ display:"flex", gap:8, alignItems:"center" }}>
-                  <button
-                    className="iconBtn"
-                    title="Minska"
-                    onClick={async () => {
-                      const r = adjustStock(items, s.kind, s.size, -1);
-                      if (!r.ok) return;
-                      setItems(r.next);
-                      await apiSaveWarehouse(r.next);
-                    }}
-                  >➖</button>
-                  <button
-                    className="iconBtn"
-                    title="Öka"
-                    onClick={async () => {
-                      const r = adjustStock(items, s.kind, s.size, +1);
-                      setItems(r.next);
-                      await apiSaveWarehouse(r.next);
-                    }}
-                  >➕</button>
-                  <button
-                    className="iconBtn danger"
-                    title="Ta bort rad"
-                    onClick={async () => {
-                      const next = setStockQty(items, s.kind, s.size, 0);
-                      setItems(next);
-                      await apiSaveWarehouse(next);
-                    }}
-                  >🗑️</button>
-                </div>
-              </div>
-            ))}
-        </div>
-      </div>
-
-      {/* SÖK TRÖJOR */}
-      <div className="card" style={{ marginTop: 12 }}>
-        <div className="card__top">
-          <div className="card__title">Sök & filter (tröjor)</div>
-          <Pill tone="neutral">{filteredJerseys.length} visade</Pill>
+          <div className="card__title">Sök tröjor i huvudlager</div>
+          <Pill tone="neutral">
+            Tillgängliga {availableCount}/{jerseys.length}
+          </Pill>
         </div>
 
         <div className="formGrid" style={{ marginTop: 10 }}>
           <div className="field">
             <span>Sök tröjnummer</span>
-            <input value={qNumber} onChange={(e)=>setQNumber(e.target.value)} placeholder="t.ex. 10" inputMode="numeric" />
+            <input
+              value={qNumber}
+              onChange={(e) => setQNumber(e.target.value)}
+              placeholder="t.ex. 10"
+              inputMode="numeric"
+            />
           </div>
 
           <div className="field">
             <span>Storlek</span>
-            <select value={qSize} onChange={(e)=>setQSize(e.target.value)}>
+            <select value={qSize} onChange={(e) => setQSize(e.target.value)}>
               <option value="all">Alla</option>
-              {sizes.map((s)=><option key={s} value={s}>{s}</option>)}
+              {sizes.map((s) => (
+                <option key={s} value={s}>
+                  {s}
+                </option>
+              ))}
             </select>
           </div>
         </div>
-
-        <div className="btnRow" style={{ marginTop: 10 }}>
-          <button className="btn btn--primary" onClick={addManualJersey}>Lägg till tröja</button>
-          <button className="btn btn--ghost" onClick={reload}>Uppdatera</button>
-        </div>
       </div>
 
-<div className="card" style={{ marginTop: 12 }}>
-  <div className="card__top">
-    <div className="card__title">Batch-tilldelning</div>
-    <Pill tone="neutral">{selectedJerseyIds.length} markerade</Pill>
-  </div>
-
-  <div className="formGrid" style={{ marginTop: 10 }}>
-    <div className="field">
-      <span>Lag</span>
-      <select
-        value={bulkAssignTeamId}
-        onChange={(e) => setBulkAssignTeamId(e.target.value)}
+      {/* ===== KOMPAKT VERKTYGSRAD ===== */}
+      <div
+        className="card"
+        style={{
+          marginTop: 12,
+          padding: 12,
+          display: "flex",
+          gap: 8,
+          alignItems: "center",
+          flexWrap: "wrap",
+        }}
       >
-        <option value="">Välj lag</option>
-        {DEFAULT_TEAMS.map((t) => (
-          <option key={t.id} value={t.id}>
-            {t.name}
-          </option>
-        ))}
-      </select>
-    </div>
-  </div>
+        <button
+          className={`btn ${showGoalkeepersOnly ? "btn--ok" : "btn--ghost"}`}
+          onClick={() => setShowGoalkeepersOnly((prev) => !prev)}
+        >
+          {showGoalkeepersOnly ? "Visa alla" : "🥅 Målvakter"}
+        </button>
 
-  <div className="btnRow" style={{ marginTop: 10 }}>
-    <button className="btn btn--ghost" onClick={toggleSelectAllVisible}>
-      {allVisibleAvailableSelected
-        ? "Avmarkera alla visade"
-        : "Markera alla visade"}
-    </button>
+        <button
+          className="iconBtn"
+          title="Batch-tilldelning"
+          aria-label="Batch-tilldelning"
+          style={toolBtnStyle(activeToolPanel === "batch")}
+          onClick={() => toggleToolPanel("batch")}
+        >
+          🧺
+        </button>
 
-    <button className="btn btn--ghost" onClick={clearSelectedJerseys}>
-      Rensa markering
-    </button>
+        <button
+          className="iconBtn"
+          title="Importera"
+          aria-label="Importera"
+          style={toolBtnStyle(activeToolPanel === "import")}
+          onClick={() => toggleToolPanel("import")}
+        >
+          📥
+        </button>
 
-    <button
-      className="btn btn--ok"
-      disabled={!bulkAssignTeamId || selectedJerseyIds.length === 0}
-      onClick={async () => {
-        const res = await assignMultipleJerseysToTeam(
-          bulkAssignTeamId,
-          selectedJerseyIds
-        );
+        <button
+          className="iconBtn"
+          title="Lager för shorts och strumpor"
+          aria-label="Lager för shorts och strumpor"
+          style={toolBtnStyle(activeToolPanel === "stock")}
+          onClick={() => toggleToolPanel("stock")}
+        >
+          📦
+        </button>
 
-        if (!res) return;
+        <button
+          className="iconBtn"
+          title="Lägg till tröja"
+          aria-label="Lägg till tröja"
+          onClick={addManualJersey}
+        >
+          ➕
+        </button>
 
-        setItems(res.nextWarehouse);
-        setSelectedJerseyIds([]);
-        setBulkAssignTeamId("");
-
-        alert(`${res.assignedCount} tröjor tilldelade till ${bulkAssignTeamId} ✅`);
-      }}
-    >
-      Tilldela markerade
-    </button>
-  </div>
-
-  <div className="muted" style={{ fontSize: 12, marginTop: 8 }}>
-    Batch-tilldelning lägger endast över tröjor. Shorts/strumpor hanteras fortfarande individuellt.
-  </div>
-</div>
-
-      {/* IMPORT TRÖJOR */}
-      <div className="card" style={{ marginTop: 12 }}>
-        <div className="card__top">
-          <div className="card__title">Importera tröjor (Excel)</div>
-          <Pill tone="neutral">Nummer, Storlek</Pill>
-        </div>
-
-        <div className="formGrid" style={{ marginTop: 10 }}>
-          <div className="field">
-            <span>Läge</span>
-            <select value={importMode} onChange={(e)=>setImportMode(e.target.value)}>
-              <option value="append">Lägg till</option>
-              <option value="replace">Ersätt (tröjor) men behåll stock</option>
-            </select>
-          </div>
-
-          <div className="field">
-            <span>Fil</span>
-            <button className="btn btn--primary" onClick={() => fileRef.current.click()}>
-              Importera huvudlager
-            </button>
-            <input
-              ref={fileRef}
-              type="file"
-              accept=".xlsx,.xls"
-              style={{ display: "none" }}
-              onChange={async (e) => {
-                const file = e.target.files?.[0];
-                if (!file) return;
-
-                try {
-                  const count = await importWarehouseExcel(file, importMode);
-                  alert(`${count} tröjor importerade ✅`);
-                } catch (err) {
-                  console.error(err);
-                  alert("Importen misslyckades ❌");
-                } finally {
-                  e.target.value = "";
-                }
-              }}
-            />
-          </div>
-        </div>
+        <button
+          className="iconBtn"
+          title="Uppdatera"
+          aria-label="Uppdatera"
+          onClick={reload}
+        >
+          🔄
+        </button>
       </div>
 
-      {/* TRÖJOR LISTA */}
+      {/* ===== VALD VERKTYGSPANEL ===== */}
+      {activeToolPanel === "batch" && (
+        <div className="card" style={{ marginTop: 12 }}>
+          <div className="card__top">
+            <div className="card__title">Batch-tilldelning</div>
+            <Pill tone="neutral">{selectedJerseyIds.length} markerade</Pill>
+          </div>
+
+          <div className="formGrid" style={{ marginTop: 10 }}>
+            <div className="field">
+              <span>Lag</span>
+              <select
+                value={bulkAssignTeamId}
+                onChange={(e) => setBulkAssignTeamId(e.target.value)}
+              >
+                <option value="">Välj lag</option>
+                {DEFAULT_TEAMS.map((t) => (
+                  <option key={t.id} value={t.id}>
+                    {t.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div className="field">
+              <span>Shorts storlek (valfritt)</span>
+              <select
+                value={bulkShortsSize}
+                onChange={(e) => setBulkShortsSize(e.target.value)}
+              >
+                <option value="">Ingen</option>
+                {stock
+                  .filter((s) => s.kind === "shorts")
+                  .map((s) => (
+                    <option key={s.id} value={s.size}>
+                      {s.size} ({s.qty})
+                    </option>
+                  ))}
+              </select>
+            </div>
+
+            <div className="field">
+              <span>Strumpor storlek (valfritt)</span>
+              <select
+                value={bulkSocksSize}
+                onChange={(e) => setBulkSocksSize(e.target.value)}
+              >
+                <option value="">Ingen</option>
+                {stock
+                  .filter((s) => s.kind === "socks")
+                  .map((s) => (
+                    <option key={s.id} value={s.size}>
+                      {s.size} ({s.qty})
+                    </option>
+                  ))}
+              </select>
+            </div>
+          </div>
+
+          <div className="btnRow" style={{ marginTop: 10 }}>
+            <button className="btn btn--ghost" onClick={toggleSelectAllVisible}>
+              {allVisibleAvailableSelected
+                ? "Avmarkera alla visade"
+                : "Markera alla visade"}
+            </button>
+
+            <button
+              className="btn btn--ghost"
+              onClick={() => {
+                clearSelectedJerseys();
+                setBulkAssignTeamId("");
+                setBulkShortsSize("");
+                setBulkSocksSize("");
+              }}
+            >
+              Rensa
+            </button>
+
+            <button
+              className="btn btn--ok"
+              disabled={!bulkAssignTeamId || selectedJerseyIds.length === 0}
+              onClick={async () => {
+                const extras = {
+                  shorts: bulkShortsSize ? { size: bulkShortsSize, qty: 1 } : null,
+                  socks: bulkSocksSize ? { size: bulkSocksSize, qty: 1 } : null,
+                };
+
+                const targetTeam = bulkAssignTeamId;
+
+                const res = await assignMultipleJerseysWithExtras(
+                  targetTeam,
+                  selectedJerseyIds,
+                  extras
+                );
+
+                if (!res) return;
+
+                setItems(res.nextWarehouse);
+                setSelectedJerseyIds([]);
+                setBulkAssignTeamId("");
+                setBulkShortsSize("");
+                setBulkSocksSize("");
+                setActiveToolPanel(null);
+
+                alert(
+                  `${res.assignedCount} tröjor tilldelade till ${targetTeam} ✅\nShorts: ${res.shortsAssigned}\nStrumpor: ${res.socksAssigned}`
+                );
+              }}
+            >
+              Tilldela markerade
+            </button>
+          </div>
+
+          <div className="muted" style={{ fontSize: 12, marginTop: 8 }}>
+            Alla markerade tröjor får samma valda shorts- och strumpstorlek.
+          </div>
+        </div>
+      )}
+
+      {activeToolPanel === "import" && (
+        <div className="card" style={{ marginTop: 12 }}>
+          <div className="card__top">
+            <div className="card__title">Importera tröjor</div>
+            <Pill tone="neutral">Nummer + Storlek</Pill>
+          </div>
+
+          <div className="formGrid" style={{ marginTop: 10 }}>
+            <div className="field">
+              <span>Läge</span>
+              <select
+                value={importMode}
+                onChange={(e) => setImportMode(e.target.value)}
+              >
+                <option value="append">Lägg till</option>
+                <option value="replace">Ersätt tröjor men behåll stock</option>
+              </select>
+            </div>
+
+            <div className="field">
+              <span>Fil</span>
+              <button
+                className="btn btn--primary"
+                onClick={() => fileRef.current?.click()}
+              >
+                Välj Excel-fil
+              </button>
+            </div>
+          </div>
+
+          <input
+            ref={fileRef}
+            type="file"
+            accept=".xlsx,.xls"
+            style={{ display: "none" }}
+            onChange={async (e) => {
+              const file = e.target.files?.[0];
+              if (!file) return;
+
+              try {
+                const count = await importWarehouseExcel(file, importMode);
+                alert(`${count} tröjor importerade ✅`);
+                setActiveToolPanel(null);
+              } catch (err) {
+                console.error(err);
+                alert("Importen misslyckades ❌");
+              } finally {
+                e.target.value = "";
+              }
+            }}
+          />
+        </div>
+      )}
+
+      {activeToolPanel === "stock" && (
+        <div className="card" style={{ marginTop: 12 }}>
+          <div className="card__top">
+            <div className="card__title">Shorts & Strumpor – lager per storlek</div>
+            <Pill tone="neutral">{stock.length} rader</Pill>
+          </div>
+
+          <div className="formGrid" style={{ marginTop: 10 }}>
+            <div className="field">
+              <span>Typ</span>
+              <select id="stockKind">
+                {STOCK_KINDS.map((k) => (
+                  <option key={k.id} value={k.id}>
+                    {k.label}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div className="field">
+              <span>Storlek</span>
+              <input id="stockSize" placeholder="t.ex. 152 eller 31-33" />
+            </div>
+
+            <div className="field">
+              <span>Antal</span>
+              <input id="stockQty" inputMode="numeric" placeholder="t.ex. 10" />
+            </div>
+
+            <button
+              className="btn btn--ok"
+              onClick={async () => {
+                const kind = document.getElementById("stockKind").value;
+                const size = String(
+                  document.getElementById("stockSize").value || ""
+                ).trim();
+                const qty = Number(document.getElementById("stockQty").value || 0);
+                if (!size || qty < 0) return;
+
+                const next = setStockQty(items, kind, size, qty);
+                setItems(next);
+                await apiSaveWarehouse(next);
+
+                document.getElementById("stockSize").value = "";
+                document.getElementById("stockQty").value = "";
+              }}
+            >
+              Spara
+            </button>
+          </div>
+
+          <div className="history" style={{ marginTop: 12 }}>
+            {stock
+              .slice()
+              .sort((a, b) => (a.kind + a.size).localeCompare(b.kind + b.size, "sv"))
+              .map((s) => (
+                <div key={s.id} className="historyRow">
+                  <div>
+                    <div className="historyRow__title">
+                      {kindLabel(s.kind)} · {s.size}
+                    </div>
+                    <div className="historyRow__sub">
+                      I lager: <strong>{s.qty}</strong>
+                    </div>
+                  </div>
+
+                  <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                    <button
+                      className="iconBtn"
+                      title="Minska"
+                      onClick={async () => {
+                        const r = adjustStock(items, s.kind, s.size, -1);
+                        if (!r.ok) return;
+                        setItems(r.next);
+                        await apiSaveWarehouse(r.next);
+                      }}
+                    >
+                      ➖
+                    </button>
+
+                    <button
+                      className="iconBtn"
+                      title="Öka"
+                      onClick={async () => {
+                        const r = adjustStock(items, s.kind, s.size, +1);
+                        setItems(r.next);
+                        await apiSaveWarehouse(r.next);
+                      }}
+                    >
+                      ➕
+                    </button>
+
+                    <button
+                      className="iconBtn danger"
+                      title="Ta bort rad"
+                      onClick={async () => {
+                        const next = setStockQty(items, s.kind, s.size, 0);
+                        setItems(next);
+                        await apiSaveWarehouse(next);
+                      }}
+                    >
+                      🗑️
+                    </button>
+                  </div>
+                </div>
+              ))}
+          </div>
+        </div>
+      )}
+
+      {/* ===== TRÖJORNA DIREKT EFTER TOPPEN ===== */}
       <div className="history" style={{ marginTop: 12 }}>
         {filteredJerseys.length === 0 && <div className="empty">Inga träffar</div>}
 
@@ -1487,31 +1723,38 @@ async function assignMultipleJerseysToTeam(teamId, jerseyIds) {
           <div key={i.id} className="historyRow">
             <div>
               <div className="historyRow__title">
-  #{i.number} · {i.size}
-  {i.position === "goalkeeper" && " 🥅"}
-</div>
+                #{i.number} · {i.size}
+                {i.position === "goalkeeper" && " 🥅"}
+              </div>
               <div className="historyRow__sub">
                 Status: {i.status === "available" ? "Tillgänglig" : `Tilldelad (${i.teamId})`}
               </div>
             </div>
 
-            <div style={{ display:"flex", gap:8, alignItems:"center", flexWrap:"wrap" }}>
+            <div
+              style={{
+                display: "flex",
+                gap: 8,
+                alignItems: "center",
+                flexWrap: "wrap",
+              }}
+            >
               {i.status === "available" ? (
                 <Pill tone="ok">Tillgänglig</Pill>
               ) : (
                 <Pill tone="warn">Tilldelad</Pill>
               )}
-              
-{i.status === "available" && (
-  <label style={{ display: "flex", alignItems: "center", gap: 6 }}>
-    <input
-      type="checkbox"
-      checked={selectedJerseyIds.includes(i.id)}
-      onChange={() => toggleSelectedJersey(i.id)}
-    />
-    <span style={{ fontSize: 12 }}>Markera</span>
-  </label>
-)}
+
+              {i.status === "available" && (
+                <label style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                  <input
+                    type="checkbox"
+                    checked={selectedJerseyIds.includes(i.id)}
+                    onChange={() => toggleSelectedJersey(i.id)}
+                  />
+                  <span style={{ fontSize: 12 }}>Markera</span>
+                </label>
+              )}
 
               {i.status === "available" && assigningId !== i.id && (
                 <button
@@ -1528,31 +1771,53 @@ async function assignMultipleJerseysToTeam(teamId, jerseyIds) {
               )}
 
               {i.status === "available" && assigningId === i.id && (
-                <div style={{ display:"flex", gap:8, flexWrap:"wrap", alignItems:"center" }}>
-                  <select value={assignTeamId} onChange={(e)=>setAssignTeamId(e.target.value)}>
+                <div
+                  style={{
+                    display: "flex",
+                    gap: 8,
+                    flexWrap: "wrap",
+                    alignItems: "center",
+                  }}
+                >
+                  <select
+                    value={assignTeamId}
+                    onChange={(e) => setAssignTeamId(e.target.value)}
+                  >
                     <option value="">Välj lag</option>
-                    {DEFAULT_TEAMS.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
+                    {DEFAULT_TEAMS.map((t) => (
+                      <option key={t.id} value={t.id}>
+                        {t.name}
+                      </option>
+                    ))}
                   </select>
 
-                  {/* Shorts - max 1 storlek */}
-<select value={extraShortsSize} onChange={(e)=>setExtraShortsSize(e.target.value)}>
-  <option value="">Shorts storlek</option>
-  {stock.filter(s=>s.kind==="shorts").map(s => (
-    <option key={s.id} value={s.size}>
-      {s.size} ({s.qty})
-    </option>
-  ))}
-</select>
+                  <select
+                    value={extraShortsSize}
+                    onChange={(e) => setExtraShortsSize(e.target.value)}
+                  >
+                    <option value="">Shorts storlek</option>
+                    {stock
+                      .filter((s) => s.kind === "shorts")
+                      .map((s) => (
+                        <option key={s.id} value={s.size}>
+                          {s.size} ({s.qty})
+                        </option>
+                      ))}
+                  </select>
 
-<select value={extraSocksSize} onChange={(e)=>setExtraSocksSize(e.target.value)}>
-  <option value="">Strumpor storlek</option>
-  {stock.filter(s=>s.kind==="socks").map(s => (
-    <option key={s.id} value={s.size}>
-      {s.size} ({s.qty})
-    </option>
-  ))}
-</select>
-                
+                  <select
+                    value={extraSocksSize}
+                    onChange={(e) => setExtraSocksSize(e.target.value)}
+                  >
+                    <option value="">Strumpor storlek</option>
+                    {stock
+                      .filter((s) => s.kind === "socks")
+                      .map((s) => (
+                        <option key={s.id} value={s.size}>
+                          {s.size} ({s.qty})
+                        </option>
+                      ))}
+                  </select>
 
                   <button
                     className="iconBtn ok"
@@ -1560,16 +1825,20 @@ async function assignMultipleJerseysToTeam(teamId, jerseyIds) {
                     disabled={!assignTeamId}
                     onClick={async () => {
                       const extras = {
-  shorts: extraShortsSize
-    ? { size: extraShortsSize, qty: 1 }
-    : null,
+                        shorts: extraShortsSize
+                          ? { size: extraShortsSize, qty: 1 }
+                          : null,
+                        socks: extraSocksSize
+                          ? { size: extraSocksSize, qty: 1 }
+                          : null,
+                      };
 
-  socks: extraSocksSize
-    ? { size: extraSocksSize, qty: 1 }
-    : null,
-};
+                      const nextWarehouse = await assignJerseyWithExtras(
+                        i.id,
+                        assignTeamId,
+                        extras
+                      );
 
-                      const nextWarehouse = await assignJerseyWithExtras(i.id, assignTeamId, extras);
                       if (nextWarehouse) setItems(nextWarehouse);
 
                       setAssigningId(null);
@@ -1577,7 +1846,9 @@ async function assignMultipleJerseysToTeam(teamId, jerseyIds) {
                       setExtraShortsSize("");
                       setExtraSocksSize("");
                     }}
-                  >✅</button>
+                  >
+                    ✅
+                  </button>
 
                   <button
                     className="iconBtn"
@@ -1588,7 +1859,9 @@ async function assignMultipleJerseysToTeam(teamId, jerseyIds) {
                       setExtraShortsSize("");
                       setExtraSocksSize("");
                     }}
-                  >✖️</button>
+                  >
+                    ✖️
+                  </button>
                 </div>
               )}
 
@@ -1597,7 +1870,9 @@ async function assignMultipleJerseysToTeam(teamId, jerseyIds) {
                 title="Ta bort tröja"
                 onClick={() => removeJersey(i.id)}
                 disabled={i.status !== "available"}
-              >🗑️</button>
+              >
+                🗑️
+              </button>
             </div>
           </div>
         ))}
