@@ -928,9 +928,6 @@ function NotificationsPage({ user }) {
 }
 /* ================= HUVUDLAGER: Matchkläder (Warehouse) ================= */
 
-
-
-
 function WarehouseMatchkitPage({ user }) {
   const fileRef = useRef(null);
 
@@ -954,8 +951,13 @@ function WarehouseMatchkitPage({ user }) {
   const [bulkShortsSize, setBulkShortsSize] = useState("");
   const [bulkSocksSize, setBulkSocksSize] = useState("");
 
-  // vilket verktyg som är öppet
+  // tool panels
   const [activeToolPanel, setActiveToolPanel] = useState(null); // null | "batch" | "import" | "stock"
+
+  // stock form (kontrollerade inputs)
+  const [stockKindInput, setStockKindInput] = useState("shorts");
+  const [stockSizeInput, setStockSizeInput] = useState("");
+  const [stockQtyInput, setStockQtyInput] = useState("");
 
   useEffect(() => {
     apiLoadWarehouse().then((w) => setItems(normalizeWarehouse(w)));
@@ -989,6 +991,7 @@ function WarehouseMatchkitPage({ user }) {
   }, [jerseys, qNumber, qSize, showGoalkeepersOnly]);
 
   const availableCount = jerseys.filter((j) => j.status === "available").length;
+  const assignedCount = jerseys.length - availableCount;
 
   const reload = async () => {
     const w = await apiLoadWarehouse();
@@ -1035,41 +1038,41 @@ function WarehouseMatchkitPage({ user }) {
     const parsed = await parseMatchkitExcel(file);
 
     const incoming = (Array.isArray(parsed) ? parsed : [])
-      .map((row) => ({
-        id: uuid(),
-        type: "jersey",
-        number: Number(row.Nummer ?? row.nummer ?? row.number),
-        size: String(row.Storlek ?? row.storlek ?? row.size ?? "").trim(),
-        position:
-          String(
-            row.position ??
-              row.Position ??
-              row.typ ??
-              row.Typ ??
-              row.roll ??
-              row.Roll ??
-              ""
-          )
-            .toLowerCase()
-            .trim() === "målvakt" ||
-          String(
-            row.position ??
-              row.Position ??
-              row.typ ??
-              row.Typ ??
-              row.roll ??
-              row.Roll ??
-              ""
-          )
-            .toLowerCase()
-            .trim() === "goalkeeper"
-            ? "goalkeeper"
-            : "outfield",
-        status: "available",
-        teamId: null,
-        note: "",
-        createdAt: new Date().toISOString(),
-      }))
+      .map((row) => {
+        const roleVal = String(
+          row.position ??
+            row.Position ??
+            row.typ ??
+            row.Typ ??
+            row.roll ??
+            row.Roll ??
+            row.rolle ??
+            row.Rolle ??
+            ""
+        )
+          .toLowerCase()
+          .trim();
+
+        const isGoalkeeper =
+          roleVal === "målvakt" ||
+          roleVal === "goalkeeper" ||
+          roleVal === "keeper" ||
+          roleVal === "mv";
+
+        return {
+          id: uuid(),
+          type: "jersey",
+          number: Number(row.Nummer ?? row.nummer ?? row.number ?? row.Number),
+          size: String(
+            row.Storlek ?? row.storlek ?? row.size ?? row.Size ?? ""
+          ).trim(),
+          position: isGoalkeeper ? "goalkeeper" : "outfield",
+          status: "available",
+          teamId: null,
+          note: "",
+          createdAt: new Date().toISOString(),
+        };
+      })
       .filter((x) => Number.isFinite(x.number) && x.size);
 
     if (incoming.length === 0) {
@@ -1323,118 +1326,206 @@ function WarehouseMatchkitPage({ user }) {
     };
   }
 
-  const toolBtnStyle = (active) =>
-    active
-      ? { outline: "2px solid rgba(30,91,191,.75)" }
-      : undefined;
+  const toolBtnStyle = (active) => ({
+    position: "relative",
+    borderRadius: 12,
+    minWidth: 42,
+    minHeight: 42,
+    display: "inline-flex",
+    alignItems: "center",
+    justifyContent: "center",
+    fontSize: 18,
+    background: active ? "rgba(30,91,191,0.22)" : "rgba(255,255,255,0.04)",
+    border: active
+      ? "1px solid rgba(30,91,191,.65)"
+      : "1px solid rgba(157,179,216,.18)",
+    boxShadow: active
+      ? "0 0 0 2px rgba(30,91,191,.18) inset"
+      : "none",
+  });
+
+  const floatingBadgeStyle = {
+    position: "absolute",
+    top: -7,
+    right: -7,
+    minWidth: 18,
+    height: 18,
+    padding: "0 5px",
+    borderRadius: 999,
+    background: "#22c55e",
+    color: "#06121f",
+    fontSize: 11,
+    fontWeight: 800,
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    boxShadow: "0 2px 8px rgba(0,0,0,.35)",
+  };
+
+  const stickyWrapStyle = {
+    position: "sticky",
+    top: 72, // justera till 76/80 om din topbar är högre
+    zIndex: 30,
+  };
+
+  const glassCardStyle = {
+    background: "rgba(15,23,42,0.88)",
+    backdropFilter: "blur(10px)",
+    WebkitBackdropFilter: "blur(10px)",
+    boxShadow: "0 10px 30px rgba(0,0,0,.22)",
+    border: "1px solid rgba(157,179,216,.14)",
+  };
 
   return (
     <div>
-      {/* ===== SÖK ÖVERST ===== */}
-      <div className="card">
-        <div className="card__top">
-          <div className="card__title">Sök tröjor i huvudlager</div>
-          <Pill tone="neutral">
-            Tillgängliga {availableCount}/{jerseys.length}
-          </Pill>
-        </div>
-
-        <div className="formGrid" style={{ marginTop: 10 }}>
-          <div className="field">
-            <span>Sök tröjnummer</span>
-            <input
-              value={qNumber}
-              onChange={(e) => setQNumber(e.target.value)}
-              placeholder="t.ex. 10"
-              inputMode="numeric"
-            />
+      {/* ===== STICKY STACK: sök + verktygsrad ===== */}
+      <div style={stickyWrapStyle}>
+        <div
+          className="card"
+          style={{
+            ...glassCardStyle,
+            marginBottom: 10,
+          }}
+        >
+          <div className="card__top">
+            <div className="card__title">Huvudlager – sök & filter</div>
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+              <Pill tone="neutral">Totalt {jerseys.length}</Pill>
+              <Pill tone="ok">Tillgängliga {availableCount}</Pill>
+              <Pill tone="warn">Tilldelade {assignedCount}</Pill>
+            </div>
           </div>
 
-          <div className="field">
-            <span>Storlek</span>
-            <select value={qSize} onChange={(e) => setQSize(e.target.value)}>
-              <option value="all">Alla</option>
-              {sizes.map((s) => (
-                <option key={s} value={s}>
-                  {s}
-                </option>
-              ))}
-            </select>
+          <div className="formGrid" style={{ marginTop: 10 }}>
+            <div className="field">
+              <span>Sök tröjnummer</span>
+              <input
+                value={qNumber}
+                onChange={(e) => setQNumber(e.target.value)}
+                placeholder="t.ex. 10"
+                inputMode="numeric"
+              />
+            </div>
+
+            <div className="field">
+              <span>Storlek</span>
+              <select value={qSize} onChange={(e) => setQSize(e.target.value)}>
+                <option value="all">Alla</option>
+                {sizes.map((s) => (
+                  <option key={s} value={s}>
+                    {s}
+                  </option>
+                ))}
+              </select>
+            </div>
+          </div>
+
+          <div
+            className="muted"
+            style={{ fontSize: 12, marginTop: 8, display: "flex", gap: 12, flexWrap: "wrap" }}
+          >
+            <span>Visar {filteredJerseys.length} tröjor</span>
+            <span>Markerade {selectedJerseyIds.length}</span>
+          </div>
+        </div>
+
+        <div
+          className="card"
+          style={{
+            ...glassCardStyle,
+            padding: 12,
+            display: "flex",
+            gap: 8,
+            alignItems: "center",
+            flexWrap: "wrap",
+            marginBottom: 12,
+            borderBottom: "1px solid rgba(157,179,216,0.12)",
+          }}
+        >
+          <button
+            className={`btn ${showGoalkeepersOnly ? "btn--ok" : "btn--ghost"}`}
+            onClick={() => setShowGoalkeepersOnly((prev) => !prev)}
+            style={{
+              boxShadow: showGoalkeepersOnly
+                ? "0 8px 20px rgba(34,197,94,.18)"
+                : "none",
+            }}
+          >
+            {showGoalkeepersOnly ? "Visa alla" : "🥅 Målvakter"}
+          </button>
+
+          <button
+            className="iconBtn"
+            title="Batch-tilldelning"
+            aria-label="Batch-tilldelning"
+            style={toolBtnStyle(activeToolPanel === "batch")}
+            onClick={() => toggleToolPanel("batch")}
+          >
+            🧺
+            {selectedJerseyIds.length > 0 && (
+              <span style={floatingBadgeStyle}>{selectedJerseyIds.length}</span>
+            )}
+          </button>
+
+          <button
+            className="iconBtn"
+            title="Importera"
+            aria-label="Importera"
+            style={toolBtnStyle(activeToolPanel === "import")}
+            onClick={() => toggleToolPanel("import")}
+          >
+            📥
+          </button>
+
+          <button
+            className="iconBtn"
+            title="Lager för shorts och strumpor"
+            aria-label="Lager för shorts och strumpor"
+            style={toolBtnStyle(activeToolPanel === "stock")}
+            onClick={() => toggleToolPanel("stock")}
+          >
+            📦
+          </button>
+
+          <button
+            className="iconBtn"
+            title="Lägg till tröja"
+            aria-label="Lägg till tröja"
+            style={toolBtnStyle(false)}
+            onClick={addManualJersey}
+          >
+            ➕
+          </button>
+
+          <button
+            className="iconBtn"
+            title="Uppdatera"
+            aria-label="Uppdatera"
+            style={toolBtnStyle(false)}
+            onClick={reload}
+          >
+            🔄
+          </button>
+
+          <div
+            style={{
+              marginLeft: "auto",
+              display: "flex",
+              gap: 8,
+              flexWrap: "wrap",
+            }}
+          >
+            <Pill tone="neutral">{filteredJerseys.length} visade</Pill>
+            {selectedJerseyIds.length > 0 && (
+              <Pill tone="ok">{selectedJerseyIds.length} markerade</Pill>
+            )}
           </div>
         </div>
       </div>
 
-      {/* ===== KOMPAKT VERKTYGSRAD ===== */}
-      <div
-        className="card"
-        style={{
-          marginTop: 12,
-          padding: 12,
-          display: "flex",
-          gap: 8,
-          alignItems: "center",
-          flexWrap: "wrap",
-        }}
-      >
-        <button
-          className={`btn ${showGoalkeepersOnly ? "btn--ok" : "btn--ghost"}`}
-          onClick={() => setShowGoalkeepersOnly((prev) => !prev)}
-        >
-          {showGoalkeepersOnly ? "Visa alla" : "🥅 Målvakter"}
-        </button>
-
-        <button
-          className="iconBtn"
-          title="Batch-tilldelning"
-          aria-label="Batch-tilldelning"
-          style={toolBtnStyle(activeToolPanel === "batch")}
-          onClick={() => toggleToolPanel("batch")}
-        >
-          🧺
-        </button>
-
-        <button
-          className="iconBtn"
-          title="Importera"
-          aria-label="Importera"
-          style={toolBtnStyle(activeToolPanel === "import")}
-          onClick={() => toggleToolPanel("import")}
-        >
-          📥
-        </button>
-
-        <button
-          className="iconBtn"
-          title="Lager för shorts och strumpor"
-          aria-label="Lager för shorts och strumpor"
-          style={toolBtnStyle(activeToolPanel === "stock")}
-          onClick={() => toggleToolPanel("stock")}
-        >
-          📦
-        </button>
-
-        <button
-          className="iconBtn"
-          title="Lägg till tröja"
-          aria-label="Lägg till tröja"
-          onClick={addManualJersey}
-        >
-          ➕
-        </button>
-
-        <button
-          className="iconBtn"
-          title="Uppdatera"
-          aria-label="Uppdatera"
-          onClick={reload}
-        >
-          🔄
-        </button>
-      </div>
-
-      {/* ===== VALD VERKTYGSPANEL ===== */}
+      {/* ===== VERKTYGSPANELER ===== */}
       {activeToolPanel === "batch" && (
-        <div className="card" style={{ marginTop: 12 }}>
+        <div className="card" style={{ marginTop: 0 }}>
           <div className="card__top">
             <div className="card__title">Batch-tilldelning</div>
             <Pill tone="neutral">{selectedJerseyIds.length} markerade</Pill>
@@ -1552,10 +1643,10 @@ function WarehouseMatchkitPage({ user }) {
       )}
 
       {activeToolPanel === "import" && (
-        <div className="card" style={{ marginTop: 12 }}>
+        <div className="card" style={{ marginTop: 0 }}>
           <div className="card__top">
             <div className="card__title">Importera tröjor</div>
-            <Pill tone="neutral">Nummer + Storlek</Pill>
+            <Pill tone="neutral">Nummer + Storlek (+ roll valfritt)</Pill>
           </div>
 
           <div className="formGrid" style={{ marginTop: 10 }}>
@@ -1606,16 +1697,19 @@ function WarehouseMatchkitPage({ user }) {
       )}
 
       {activeToolPanel === "stock" && (
-        <div className="card" style={{ marginTop: 12 }}>
+        <div className="card" style={{ marginTop: 0 }}>
           <div className="card__top">
-            <div className="card__title">Shorts & Strumpor – lager per storlek</div>
+            <div className="card__title">Shorts & Strumpor – lager</div>
             <Pill tone="neutral">{stock.length} rader</Pill>
           </div>
 
           <div className="formGrid" style={{ marginTop: 10 }}>
             <div className="field">
               <span>Typ</span>
-              <select id="stockKind">
+              <select
+                value={stockKindInput}
+                onChange={(e) => setStockKindInput(e.target.value)}
+              >
                 {STOCK_KINDS.map((k) => (
                   <option key={k.id} value={k.id}>
                     {k.label}
@@ -1626,30 +1720,38 @@ function WarehouseMatchkitPage({ user }) {
 
             <div className="field">
               <span>Storlek</span>
-              <input id="stockSize" placeholder="t.ex. 152 eller 31-33" />
+              <input
+                value={stockSizeInput}
+                onChange={(e) => setStockSizeInput(e.target.value)}
+                placeholder="t.ex. 152 eller 31-33"
+              />
             </div>
 
             <div className="field">
               <span>Antal</span>
-              <input id="stockQty" inputMode="numeric" placeholder="t.ex. 10" />
+              <input
+                value={stockQtyInput}
+                onChange={(e) => setStockQtyInput(e.target.value)}
+                inputMode="numeric"
+                placeholder="t.ex. 10"
+              />
             </div>
 
             <button
               className="btn btn--ok"
               onClick={async () => {
-                const kind = document.getElementById("stockKind").value;
-                const size = String(
-                  document.getElementById("stockSize").value || ""
-                ).trim();
-                const qty = Number(document.getElementById("stockQty").value || 0);
+                const kind = stockKindInput;
+                const size = String(stockSizeInput || "").trim();
+                const qty = Number(stockQtyInput || 0);
+
                 if (!size || qty < 0) return;
 
                 const next = setStockQty(items, kind, size, qty);
                 setItems(next);
                 await apiSaveWarehouse(next);
 
-                document.getElementById("stockSize").value = "";
-                document.getElementById("stockQty").value = "";
+                setStockSizeInput("");
+                setStockQtyInput("");
               }}
             >
               Spara
@@ -1715,19 +1817,45 @@ function WarehouseMatchkitPage({ user }) {
         </div>
       )}
 
-      {/* ===== TRÖJORNA DIREKT EFTER TOPPEN ===== */}
+      {/* ===== TRÖJORNA ===== */}
       <div className="history" style={{ marginTop: 12 }}>
         {filteredJerseys.length === 0 && <div className="empty">Inga träffar</div>}
 
         {filteredJerseys.map((i) => (
-          <div key={i.id} className="historyRow">
+          <div
+            key={i.id}
+            className="historyRow"
+            style={{
+              borderRadius: 14,
+              marginBottom: 8,
+              background:
+                i.status === "available"
+                  ? "rgba(255,255,255,0.02)"
+                  : "rgba(245,158,11,0.06)",
+              border:
+                i.status === "available"
+                  ? "1px solid rgba(157,179,216,.10)"
+                  : "1px solid rgba(245,158,11,.18)",
+            }}
+          >
             <div>
               <div className="historyRow__title">
                 #{i.number} · {i.size}
                 {i.position === "goalkeeper" && " 🥅"}
               </div>
-              <div className="historyRow__sub">
-                Status: {i.status === "available" ? "Tillgänglig" : `Tilldelad (${i.teamId})`}
+
+              <div
+                className="historyRow__sub"
+                style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}
+              >
+                <span>
+                  Status:{" "}
+                  {i.status === "available" ? "Tillgänglig" : `Tilldelad (${i.teamId})`}
+                </span>
+
+                {i.position === "goalkeeper" && (
+                  <span className="chip">Målvakt</span>
+                )}
               </div>
             </div>
 
@@ -1737,6 +1865,7 @@ function WarehouseMatchkitPage({ user }) {
                 gap: 8,
                 alignItems: "center",
                 flexWrap: "wrap",
+                justifyContent: "flex-end",
               }}
             >
               {i.status === "available" ? (
@@ -1746,7 +1875,21 @@ function WarehouseMatchkitPage({ user }) {
               )}
 
               {i.status === "available" && (
-                <label style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                <label
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 6,
+                    padding: "6px 10px",
+                    borderRadius: 12,
+                    background: selectedJerseyIds.includes(i.id)
+                      ? "rgba(34,197,94,.14)"
+                      : "rgba(255,255,255,.04)",
+                    border: selectedJerseyIds.includes(i.id)
+                      ? "1px solid rgba(34,197,94,.35)"
+                      : "1px solid rgba(157,179,216,.12)",
+                  }}
+                >
                   <input
                     type="checkbox"
                     checked={selectedJerseyIds.includes(i.id)}
@@ -1777,6 +1920,7 @@ function WarehouseMatchkitPage({ user }) {
                     gap: 8,
                     flexWrap: "wrap",
                     alignItems: "center",
+                    justifyContent: "flex-end",
                   }}
                 >
                   <select
@@ -1880,6 +2024,8 @@ function WarehouseMatchkitPage({ user }) {
     </div>
   );
 }
+
+
 
 /* ================= Page: Matchkit ================= */
 function MatchKitPage({ user, teamId, teamsVisible }) {

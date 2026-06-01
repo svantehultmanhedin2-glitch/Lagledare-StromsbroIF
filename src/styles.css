@@ -231,3 +231,33 @@ body{ margin:0; background: linear-gradient(180deg, #050b14, var(--bg)); color:v
 .goalkeeper {
   border-left: 4px solid #22c55e;
 }
+
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 700;
+  background: rgba(34, 197, 94, 0.12);
+  color: #9ef0b5;
+  border: 1px solid rgba(34, 197, 94, 0.22);
+}
+
+.iconBtn {
+  transition: transform 0.15s ease, box-shadow 0.15s ease, background 0.15s ease;
+}
+
+.iconBtn:hover {
+  transform: translateY(-1px);
+}
+
+.card,
+.historyRow,
+.btn,
+.iconBtn,
+input,
+select {
+  transition: all 0.16s ease;
+}
