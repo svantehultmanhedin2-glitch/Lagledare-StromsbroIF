@@ -43,6 +43,67 @@ async function apiSaveIssued(teamId, items) {
   if (!r.ok) throw new Error("Kunde inte spara issued");
 }
 
+async function addLeaderClothesEntry(teamId, leaderName, items) {
+  const existing = await apiLoadIssued(teamId);
+
+  const entry = {
+    id: uuid(),
+    teamId,
+    leaderName,
+    items,
+    createdAt: new Date().toISOString(),
+    source: "manual",
+  };
+
+  const next = [entry, ...(existing || [])];
+
+  await apiSaveIssued(teamId, next);
+  return next;
+}
+
+async function importLeaderClothesExcel(file) {
+  const rows = await parseMatchkitExcel(file);
+
+  let created = 0;
+
+  for (const r of rows) {
+    const leaderName = String(r.Namn ?? "").trim();
+    const teamId = String(r.Lag ?? "").trim();
+
+    if (!leaderName || !teamId) continue;
+
+    const items = [];
+
+    if (r.Halvzip) items.push({ name: "Halvzip", quantity: 1 });
+    if (r.Tshirt) items.push({ name: "T-shirt", quantity: 1 });
+    if (r.Byxa) items.push({ name: "Byxa", quantity: 1 });
+    if (r.Shorts) items.push({ name: "Shorts", quantity: 1 });
+    if (r.Jacka) items.push({ name: "Jacka", quantity: 1 });
+
+    if (items.length === 0) continue;
+
+    const existing = await apiLoadIssued(teamId);
+
+    const entry = {
+      id: uuid(),
+      teamId,
+      leaderName,
+      items,
+      createdAt: new Date().toISOString(),
+      source: "import",
+    };
+
+    await apiSaveIssued(teamId, [
+      entry,
+      ...(existing || []),
+    ]);
+
+    created++;
+  }
+
+  return created;
+}
+
 // ===== API: BUDGET =====
 async function apiLoadBudget(teamId) {
   const r = await fetch(`/api/budget?teamId=${encodeURIComponent(teamId)}`);
@@ -1364,7 +1425,7 @@ function WarehouseMatchkitPage({ user }) {
 
   const stickyWrapStyle = {
     position: "sticky",
-    top: 72, // justera till 76/80 om din topbar är högre
+    top: 80, // justera till 76/80 om din topbar är högre
     zIndex: 30,
   };
 
@@ -2462,6 +2523,104 @@ const returnToWarehouse = async (itemId) => {
     </div>
   );
 }
+/* ================= Page: Leaderclothes v2================= */
+
+function LeaderClothesV2Page({ user, teamId }) {
+  const [entries, setEntries] = useState([]);
+
+  useEffect(() => {
+    apiLoadIssued(teamId).then((r) => {
+      setEntries(Array.isArray(r) ? r : []);
+    });
+  }, [teamId]);
+
+  const addManual = async () => {
+    const leaderName = prompt("Ledarens namn?");
+    if (!leaderName) return;
+
+    const items = [];
+
+    if (confirm("Halvzip?")) items.push({ name: "Halvzip", quantity: 1 });
+    if (confirm("T-shirt?")) items.push({ name: "T-shirt", quantity: 1 });
+    if (confirm("Byxa?")) items.push({ name: "Byxa", quantity: 1 });
+    if (confirm("Shorts?")) items.push({ name: "Shorts", quantity: 1 });
+    if (confirm("Jacka?")) items.push({ name: "Jacka", quantity: 1 });
+
+    if (items.length === 0) return;
+
+    const next = await addLeaderClothesEntry(teamId, leaderName, items);
+    setEntries(next);
+  };
+
+  const importExcel = async () => {
+    const input = document.createElement("input");
+    input.type = "file";
+    input.accept = ".xlsx";
+
+    input.onchange = async (e) => {
+      const file = e.target.files[0];
+      if (!file) return;
+
+      const n = await importLeaderClothesExcel(file);
+      alert(`${n} rader importerade ✅`);
+
+      const updated = await apiLoadIssued(teamId);
+      setEntries(updated);
+    };
+
+    input.click();
+  };
+
+  return (
+    <div>
+      <div className="card">
+        <div className="card__title">Ledarkläder V2 – {teamId}</div>
+      </div>
+
+      <div className="card">
+        <div className="btnRow">
+          <button className="btn btn--primary" onClick={addManual}>
+            ➕ Lägg till
+          </button>
+
+          <button className="btn btn--ghost" onClick={importExcel}>
+            📥 Importera Excel
+          </button>
+        </div>
+      </div>
+
+      <div className="history">
+        {entries.map((e) => (
+          <div key={e.id} className="historyRow">
+            <div>
+              <div className="historyRow__title">{e.leaderName}</div>
+
+              <div className="historyRow__sub">
+                {e.items.map((i, idx) => (
+                  <span key={idx} style={{ marginRight: 8 }}>
+                    {i.name}
+                  </span>
+                ))}
+              </div>
+            </div>
+
+            <button
+              className="btn btn--danger"
+              onClick={async () => {
+                const next = entries.filter((x) => x.id !== e.id);
+                await apiSaveIssued(teamId, next);
+                setEntries(next);
+              }}
+            >
+              Ta bort
+            </button>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 /* ================= Page: Leaderclothes ================= */
 function LeaderClothesPage({ user, teamId, nav }) {
   const [budget, setBudget] = useState({ teamId, total: 0, used: 0 });
@@ -3643,7 +3802,7 @@ if (route === "/matchkit")
       );
     if (route === "/leaderclothes")
       return (
-        <LeaderClothesPage user={auth.user} teamId={activeTeamId} nav={nav} />
+       <LeaderClothesV2Page user={auth.user} teamId={activeTeamId} />
       );
     if (route === "/order") return <OrderPage user={auth.user} teamId={activeTeamId} />;
     if (route === "/teamcash") return <TeamCashPage user={auth.user} teamId={activeTeamId} />;
