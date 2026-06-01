@@ -944,6 +944,8 @@ function WarehouseMatchkitPage({ user }) {
   // tilldelning
   const [assigningId, setAssigningId] = useState(null);
   const [assignTeamId, setAssignTeamId] = useState("");
+const [selectedJerseyIds, setSelectedJerseyIds] = useState([]);
+const [bulkAssignTeamId, setBulkAssignTeamId] = useState("");
 
   // extras: max 1 storlek per typ
   const [extraShortsSize, setExtraShortsSize] = useState("");
@@ -994,6 +996,37 @@ const filteredJerseys = useMemo(() => {
     const w = await apiLoadWarehouse();
     setItems(normalizeWarehouse(w));
   };
+
+const toggleSelectedJersey = (id) => {
+  setSelectedJerseyIds((prev) =>
+    prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]
+  );
+};
+
+const clearSelectedJerseys = () => {
+  setSelectedJerseyIds([]);
+};
+
+const availableFilteredIds = filteredJerseys
+  .filter((j) => j.status === "available")
+  .map((j) => j.id);
+
+const allVisibleAvailableSelected =
+  availableFilteredIds.length > 0 &&
+  availableFilteredIds.every((id) => selectedJerseyIds.includes(id));
+
+const toggleSelectAllVisible = () => {
+  if (allVisibleAvailableSelected) {
+    setSelectedJerseyIds((prev) =>
+      prev.filter((id) => !availableFilteredIds.includes(id))
+    );
+  } else {
+    setSelectedJerseyIds((prev) => [
+      ...new Set([...prev, ...availableFilteredIds]),
+    ]);
+  }
+};
+
 
   // import tröjor till huvudlager (Excel)
   const importWarehouseExcel = async (file, mode) => {
@@ -1142,7 +1175,69 @@ const addManualJersey = async () => {
 
     return nextWarehouse;
   }
+async function assignMultipleJerseysToTeam(teamId, jerseyIds) {
+  const ids = Array.isArray(jerseyIds) ? jerseyIds : [];
 
+  if (!teamId) {
+    alert("Välj ett lag först.");
+    return null;
+  }
+
+  if (ids.length === 0) {
+    alert("Markera minst en tröja.");
+    return null;
+  }
+
+  const warehouse = normalizeWarehouse(await apiLoadWarehouse());
+  const { jerseys } = splitWarehouse(warehouse);
+
+  const selectedJerseys = jerseys.filter((j) => ids.includes(j.id));
+
+  if (selectedJerseys.length !== ids.length) {
+    alert("Några valda tröjor kunde inte hittas.");
+    return null;
+  }
+
+  const unavailable = selectedJerseys.filter((j) => j.status !== "available");
+  if (unavailable.length > 0) {
+    alert("En eller flera markerade tröjor är inte längre tillgängliga.");
+    return null;
+  }
+
+  const teamItemsRaw = await apiLoadMatchKit(teamId);
+  const teamItems = normalizeMatchkit(teamItemsRaw);
+
+  const existingIds = new Set(teamItems.map((x) => x.id));
+
+  const newTeamItems = selectedJerseys
+    .filter((j) => !existingIds.has(j.id))
+    .map((j) => ({
+      id: j.id,
+      kind: "jersey",
+      position: j.position ?? "outfield",
+      number: j.number,
+      size: j.size,
+      playerName: "",
+      extras: {
+        shorts: null,
+        socks: null,
+      },
+    }));
+
+  const nextWarehouse = warehouse.map((x) =>
+    x.type === "jersey" && ids.includes(x.id)
+      ? { ...x, status: "assigned", teamId }
+      : x
+  );
+
+  await apiSaveMatchKit(teamId, [...newTeamItems, ...teamItems]);
+  await apiSaveWarehouse(nextWarehouse);
+
+  return {
+    nextWarehouse,
+    assignedCount: newTeamItems.length,
+  };
+}
   return (
     <div>
       <div className="summaryCard">
@@ -1278,6 +1373,67 @@ const addManualJersey = async () => {
         </div>
       </div>
 
+<div className="card" style={{ marginTop: 12 }}>
+  <div className="card__top">
+    <div className="card__title">Batch-tilldelning</div>
+    <Pill tone="neutral">{selectedJerseyIds.length} markerade</Pill>
+  </div>
+
+  <div className="formGrid" style={{ marginTop: 10 }}>
+    <div className="field">
+      <span>Lag</span>
+      <select
+        value={bulkAssignTeamId}
+        onChange={(e) => setBulkAssignTeamId(e.target.value)}
+      >
+        <option value="">Välj lag</option>
+        {DEFAULT_TEAMS.map((t) => (
+          <option key={t.id} value={t.id}>
+            {t.name}
+          </option>
+        ))}
+      </select>
+    </div>
+  </div>
+
+  <div className="btnRow" style={{ marginTop: 10 }}>
+    <button className="btn btn--ghost" onClick={toggleSelectAllVisible}>
+      {allVisibleAvailableSelected
+        ? "Avmarkera alla visade"
+        : "Markera alla visade"}
+    </button>
+
+    <button className="btn btn--ghost" onClick={clearSelectedJerseys}>
+      Rensa markering
+    </button>
+
+    <button
+      className="btn btn--ok"
+      disabled={!bulkAssignTeamId || selectedJerseyIds.length === 0}
+      onClick={async () => {
+        const res = await assignMultipleJerseysToTeam(
+          bulkAssignTeamId,
+          selectedJerseyIds
+        );
+
+        if (!res) return;
+
+        setItems(res.nextWarehouse);
+        setSelectedJerseyIds([]);
+        setBulkAssignTeamId("");
+
+        alert(`${res.assignedCount} tröjor tilldelade till ${bulkAssignTeamId} ✅`);
+      }}
+    >
+      Tilldela markerade
+    </button>
+  </div>
+
+  <div className="muted" style={{ fontSize: 12, marginTop: 8 }}>
+    Batch-tilldelning lägger endast över tröjor. Shorts/strumpor hanteras fortfarande individuellt.
+  </div>
+</div>
+
       {/* IMPORT TRÖJOR */}
       <div className="card" style={{ marginTop: 12 }}>
         <div className="card__top">
@@ -1345,6 +1501,17 @@ const addManualJersey = async () => {
               ) : (
                 <Pill tone="warn">Tilldelad</Pill>
               )}
+              
+{i.status === "available" && (
+  <label style={{ display: "flex", alignItems: "center", gap: 6 }}>
+    <input
+      type="checkbox"
+      checked={selectedJerseyIds.includes(i.id)}
+      onChange={() => toggleSelectedJersey(i.id)}
+    />
+    <span style={{ fontSize: 12 }}>Markera</span>
+  </label>
+)}
 
               {i.status === "available" && assigningId !== i.id && (
                 <button
