@@ -69,16 +69,19 @@ async function importLeaderClothesExcel(file) {
   for (const r of rows) {
     const leaderName = String(r.Namn ?? "").trim();
     const teamId = String(r.Lag ?? "").trim();
+    const year = Number(r.År ?? r.Ar ?? r.year);
 
-    if (!leaderName || !teamId) continue;
+    if (!leaderName || !teamId || !year) continue;
 
     const items = [];
 
-    if (r.Halvzip) items.push({ name: "Halvzip", quantity: 1 });
-    if (r.Tshirt) items.push({ name: "T-shirt", quantity: 1 });
-    if (r.Byxa) items.push({ name: "Byxa", quantity: 1 });
-    if (r.Shorts) items.push({ name: "Shorts", quantity: 1 });
-    if (r.Jacka) items.push({ name: "Jacka", quantity: 1 });
+    if (r.Halvzip) items.push("Halvzip");
+    if (r.Tshirt) items.push("T-shirt");
+    if (r.Byxa) items.push("Byxa");
+    if (r.Shorts) items.push("Shorts");
+    if (r.Jacka) items.push("Jacka");
+    if (r.Vinterjacka) items.push("Vinterjacka");
+    if (r.Ryggsäck) items.push("Ryggsäck");
 
     if (items.length === 0) continue;
 
@@ -88,6 +91,7 @@ async function importLeaderClothesExcel(file) {
       id: uuid(),
       teamId,
       leaderName,
+      year,
       items,
       createdAt: new Date().toISOString(),
       source: "import",
@@ -103,6 +107,7 @@ async function importLeaderClothesExcel(file) {
 
   return created;
 }
+
 
 /* ================= Utilities ================= */
 const uuid = () =>
@@ -264,6 +269,59 @@ const DEFAULT_TEAMS = [
 { id: "F19", name: "F19" },
 
 ];
+const LEADER_PRODUCTS = [
+  "Halvzip",
+  "T-shirt",
+  "Byxa",
+  "Shorts",
+  "Jacka",
+  "Vinterjacka",
+  "Ryggsäck",
+];
+
+function normalizeLeaderClothesEntries(list, currentTeamId) {
+  return (Array.isArray(list) ? list : [])
+    .map((e) => {
+      const leaderName = String(e?.leaderName ?? e?.leader ?? "").trim();
+      if (!leaderName) return null;
+
+      let items = [];
+
+      // Ny struktur: items som array av strängar
+      if (Array.isArray(e.items) && e.items.every((x) => typeof x === "string")) {
+        items = e.items.filter(Boolean);
+      }
+
+      // Mellanstruktur: items som array av objekt
+      else if (Array.isArray(e.items) && e.items.every((x) => typeof x === "object")) {
+        items = e.items
+          .map((x) => String(x?.name ?? "").trim())
+          .filter(Boolean);
+      }
+
+      // Gammal struktur: enstaka plagg i "name"
+      else if (e.name) {
+        items = [String(e.name).trim()];
+      }
+
+      if (items.length === 0) return null;
+
+      const fallbackYear = e.createdAt
+        ? new Date(e.createdAt).getFullYear()
+        : new Date().getFullYear();
+
+      return {
+        id: e.id ?? uuid(),
+        teamId: e.teamId ?? currentTeamId,
+        leaderName,
+        year: Number(e.year ?? fallbackYear),
+        items,
+        createdAt: e.createdAt ?? new Date().toISOString(),
+        source: e.source ?? "manual",
+      };
+    })
+    .filter(Boolean);
+}
 
 function ensureSeed() {
   const users = jget("users", null);
@@ -292,15 +350,6 @@ function ensureSeed() {
       pinHash: hashPin("2222"),
       teamIds: ["F11/12"],
     },
-  ]);
-
-  // Seed catalog
-  jset("catalog:leaderclothes", [
-    { id: "prod-byxa", name: "Träningsbyxa", category: "Startpaket", price: 650, active: true },
-    { id: "prod-halvzip", name: "Halvzip", category: "Startpaket", price: 600, active: true },
-    { id: "prod-tshirt", name: "T-shirt", category: "Startpaket", price: 250, active: true },
-    { id: "prod-shorts", name: "Shorts", category: "Startpaket", price: 250, active: true },
-    { id: "prod-jacka", name: "Träningsjacka", category: "Vartannat år", price: 850, active: true },
   ]);
 
 
@@ -2336,63 +2385,253 @@ const returnToWarehouse = async (itemId) => {
   );
 }
 /* ================= Page: Leaderclothes v2================= */
-
 function LeaderClothesV2Page({ user, teamId }) {
   const [entries, setEntries] = useState([]);
+  const [leaderName, setLeaderName] = useState("");
+  const [year, setYear] = useState(new Date().getFullYear());
+  const [selectedItems, setSelectedItems] = useState([]);
+  const [searchLeader, setSearchLeader] = useState("");
 
   useEffect(() => {
-    apiLoadIssued(teamId).then((r) => {
-      setEntries(Array.isArray(r) ? r : []);
-    });
+    load();
   }, [teamId]);
 
-  const addManual = async () => {
-    const leaderName = prompt("Ledarens namn?");
-    if (!leaderName) return;
+  async function load() {
+    const data = await apiLoadIssued(teamId);
+    const normalized = normalizeLeaderClothesEntries(data, teamId);
+    setEntries(normalized);
+  }
 
-    const items = [];
+  const existingLeaders = useMemo(() => {
+    return [...new Set(entries.map((e) => e.leaderName))]
+      .sort((a, b) => a.localeCompare(b, "sv"));
+  }, [entries]);
 
-    if (confirm("Halvzip?")) items.push({ name: "Halvzip", quantity: 1 });
-    if (confirm("T-shirt?")) items.push({ name: "T-shirt", quantity: 1 });
-    if (confirm("Byxa?")) items.push({ name: "Byxa", quantity: 1 });
-    if (confirm("Shorts?")) items.push({ name: "Shorts", quantity: 1 });
-    if (confirm("Jacka?")) items.push({ name: "Jacka", quantity: 1 });
+  const groupedEntries = useMemo(() => {
+    const q = searchLeader.trim().toLowerCase();
 
-    if (items.length === 0) return;
+    const filtered = entries.filter((e) => {
+      if (!q) return true;
+      return e.leaderName.toLowerCase().includes(q);
+    });
 
-    const next = await addLeaderClothesEntry(teamId, leaderName, items);
-    setEntries(next);
+    const groups = {};
+
+    for (const e of filtered) {
+      const key = e.leaderName;
+
+      if (!groups[key]) {
+        groups[key] = {
+          leaderName: key,
+          rows: [],
+          teamIds: new Set(),
+          years: new Set(),
+          itemTotals: {},
+        };
+      }
+
+      groups[key].rows.push(e);
+      groups[key].teamIds.add(e.teamId);
+      groups[key].years.add(e.year);
+
+      for (const item of e.items || []) {
+        groups[key].itemTotals[item] = (groups[key].itemTotals[item] || 0) + 1;
+      }
+    }
+
+    return Object.values(groups)
+      .map((g) => ({
+        ...g,
+        teamIds: Array.from(g.teamIds),
+        years: Array.from(g.years).sort((a, b) => Number(b) - Number(a)),
+        rows: g.rows.sort((a, b) => {
+          const byYear = Number(b.year || 0) - Number(a.year || 0);
+          if (byYear !== 0) return byYear;
+          return new Date(b.createdAt || 0) - new Date(a.createdAt || 0);
+        }),
+      }))
+      .sort((a, b) => a.leaderName.localeCompare(b.leaderName, "sv"));
+  }, [entries, searchLeader]);
+
+  const totalLeaders = groupedEntries.length;
+  const totalEntries = entries.length;
+
+  const toggleItem = (item) => {
+    setSelectedItems((prev) =>
+      prev.includes(item)
+        ? prev.filter((x) => x !== item)
+        : [...prev, item]
+    );
+  };
+
+  const clearForm = () => {
+    setLeaderName("");
+    setYear(new Date().getFullYear());
+    setSelectedItems([]);
+  };
+
+  const saveEntry = async () => {
+    const cleanName = String(leaderName || "").trim();
+    const cleanYear = Number(year);
+
+    if (!cleanName) {
+      alert("Fyll i ledarens namn.");
+      return;
+    }
+
+    if (!cleanYear || !Number.isFinite(cleanYear)) {
+      alert("Fyll i ett giltigt år.");
+      return;
+    }
+
+    if (selectedItems.length === 0) {
+      alert("Välj minst ett plagg.");
+      return;
+    }
+
+    const existing = await apiLoadIssued(teamId);
+    const safeExisting = normalizeLeaderClothesEntries(existing, teamId);
+
+    const entry = {
+      id: uuid(),
+      teamId,
+      leaderName: cleanName,
+      year: cleanYear,
+      items: selectedItems,
+      createdAt: new Date().toISOString(),
+      source: "manual",
+    };
+
+    const next = [entry, ...safeExisting];
+    await apiSaveIssued(teamId, next);
+
+    clearForm();
+    await load();
   };
 
   const importExcel = async () => {
     const input = document.createElement("input");
     input.type = "file";
-    input.accept = ".xlsx";
+    input.accept = ".xlsx,.xls";
 
     input.onchange = async (e) => {
-      const file = e.target.files[0];
+      const file = e.target.files?.[0];
       if (!file) return;
 
-      const n = await importLeaderClothesExcel(file);
-      alert(`${n} rader importerade ✅`);
-
-      const updated = await apiLoadIssued(teamId);
-      setEntries(updated);
+      try {
+        const n = await importLeaderClothesExcel(file);
+        alert(`${n} rader importerade ✅`);
+        await load();
+      } catch (err) {
+        console.error(err);
+        alert("Importen misslyckades ❌");
+      }
     };
 
     input.click();
   };
 
+  const deleteEntry = async (id) => {
+    if (!confirm("Ta bort denna utdelning?")) return;
+
+    const next = entries.filter((x) => x.id !== id);
+    await apiSaveIssued(teamId, next);
+    await load();
+  };
+
   return (
     <div>
-      <div className="card">
-        <div className="card__title">Ledarkläder V2 – {teamId}</div>
+      {/* ===== ÖVERSIKT ===== */}
+      <div className="summaryCard">
+        <div className="summaryTitle">Ledarkläder – {teamId}</div>
+        <div className="summaryValue">{totalLeaders}</div>
+        <div className="summarySub">
+          Ledare med registrerade plagg · {totalEntries} utdelningar totalt
+        </div>
       </div>
 
-      <div className="card">
-        <div className="btnRow">
-          <button className="btn btn--primary" onClick={addManual}>
-            ➕ Lägg till
+      {/* ===== FORM ===== */}
+      <div className="card" style={{ marginTop: 12 }}>
+        <div className="card__top">
+          <div className="card__title">Registrera ledarkläder</div>
+          <Pill tone="neutral">{selectedItems.length} valda</Pill>
+        </div>
+
+        <div className="formGrid" style={{ marginTop: 10 }}>
+          <div className="field">
+            <span>Ledare</span>
+            <input
+              value={leaderName}
+              onChange={(e) => setLeaderName(e.target.value)}
+              placeholder="Skriv namn eller välj befintlig"
+              list="leaderSuggestions"
+            />
+            <datalist id="leaderSuggestions">
+              {existingLeaders.map((name) => (
+                <option key={name} value={name} />
+              ))}
+            </datalist>
+          </div>
+
+          <div className="field">
+            <span>År</span>
+            <input
+              value={year}
+              onChange={(e) => setYear(Number(e.target.value))}
+              inputMode="numeric"
+              placeholder="t.ex. 2026"
+            />
+          </div>
+        </div>
+
+        <div style={{ marginTop: 12 }}>
+          <div className="muted" style={{ fontSize: 12, marginBottom: 8 }}>
+            Kryssa för vilka kläder som beställts / hämtats ut
+          </div>
+
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+            {LEADER_PRODUCTS.map((product) => {
+              const checked = selectedItems.includes(product);
+
+              return (
+                <label
+                  key={product}
+                  style={{
+                    display: "inline-flex",
+                    alignItems: "center",
+                    gap: 8,
+                    padding: "8px 12px",
+                    borderRadius: 999,
+                    border: checked
+                      ? "1px solid rgba(30,91,191,.35)"
+                      : "1px solid rgba(157,179,216,.16)",
+                    background: checked
+                      ? "rgba(30,91,191,.14)"
+                      : "rgba(255,255,255,.03)",
+                    cursor: "pointer",
+                    fontSize: 13,
+                    fontWeight: 600,
+                  }}
+                >
+                  <input
+                    type="checkbox"
+                    checked={checked}
+                    onChange={() => toggleItem(product)}
+                  />
+                  {product}
+                </label>
+              );
+            })}
+          </div>
+        </div>
+
+        <div className="btnRow" style={{ marginTop: 12 }}>
+          <button className="btn btn--primary" onClick={saveEntry}>
+            Spara
+          </button>
+
+          <button className="btn btn--ghost" onClick={clearForm}>
+            Rensa
           </button>
 
           <button className="btn btn--ghost" onClick={importExcel}>
@@ -2401,36 +2640,155 @@ function LeaderClothesV2Page({ user, teamId }) {
         </div>
       </div>
 
-      <div className="history">
-        {entries.map((e) => (
-          <div key={e.id} className="historyRow">
-            <div>
-              <div className="historyRow__title">{e.leaderName}</div>
+      {/* ===== FILTER / SÖK ===== */}
+      <div className="card" style={{ marginTop: 12 }}>
+        <div className="card__top">
+          <div className="card__title">Sök ledare</div>
+          <Pill tone="neutral">{groupedEntries.length} visade</Pill>
+        </div>
 
-              <div className="historyRow__sub">
-                {e.items.map((i, idx) => (
-                  <span key={idx} style={{ marginRight: 8 }}>
-                    {i.name}
-                  </span>
-                ))}
+        <div className="field" style={{ marginTop: 10 }}>
+          <span>Namn</span>
+          <input
+            value={searchLeader}
+            onChange={(e) => setSearchLeader(e.target.value)}
+            placeholder="Sök på ledarnamn"
+          />
+        </div>
+      </div>
+
+      {/* ===== GRUPPERAD HISTORIK ===== */}
+      <div className="history" style={{ marginTop: 12 }}>
+        {groupedEntries.length === 0 && (
+          <div className="empty">Inga registrerade ledarkläder ännu.</div>
+        )}
+
+        {groupedEntries.map((group) => (
+          <div
+            key={group.leaderName}
+            className="card"
+            style={{
+              marginBottom: 12,
+              background: "rgba(255,255,255,0.02)",
+              border: "1px solid rgba(157,179,216,.12)",
+            }}
+          >
+            <div className="card__top">
+              <div>
+                <div className="card__title">{group.leaderName}</div>
+
+                <div
+                  className="muted"
+                  style={{
+                    fontSize: 12,
+                    marginTop: 4,
+                    display: "flex",
+                    gap: 8,
+                    flexWrap: "wrap",
+                  }}
+                >
+                  <span>Lag: {group.teamIds.join(", ") || teamId}</span>
+                  <span>År: {group.years.join(", ")}</span>
+                  <span>Poster: {group.rows.length}</span>
+                </div>
               </div>
+
+              <Pill tone="neutral">{group.rows.length} st</Pill>
             </div>
 
-            <button
-              className="btn btn--danger"
-              onClick={async () => {
-                const next = entries.filter((x) => x.id !== e.id);
-                await apiSaveIssued(teamId, next);
-                setEntries(next);
-              }}
-            >
-              Ta bort
-            </button>
+            {/* Summering av plagg */}
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 10 }}>
+              {Object.entries(group.itemTotals).map(([name, count]) => (
+                <span
+                  key={`${group.leaderName}-${name}`}
+                  style={{
+                    display: "inline-flex",
+                    alignItems: "center",
+                    padding: "5px 10px",
+                    borderRadius: 999,
+                    background: "rgba(34,197,94,0.10)",
+                    border: "1px solid rgba(34,197,94,0.20)",
+                    fontSize: 12,
+                    fontWeight: 700,
+                  }}
+                >
+                  {name}: {count}
+                </span>
+              ))}
+            </div>
+
+            {/* Historikrader */}
+            <div className="history" style={{ marginTop: 12 }}>
+              {group.rows.map((e) => (
+                <div
+                  key={e.id}
+                  className="historyRow"
+                  style={{
+                    borderRadius: 12,
+                    marginBottom: 8,
+                    background: "rgba(255,255,255,0.02)",
+                    border: "1px solid rgba(157,179,216,.10)",
+                  }}
+                >
+                  <div>
+                    <div className="historyRow__title">
+                      {e.year} · {e.teamId}
+                    </div>
+
+                    <div
+                      className="historyRow__sub"
+                      style={{
+                        display: "flex",
+                        gap: 8,
+                        flexWrap: "wrap",
+                        marginTop: 6,
+                      }}
+                    >
+                      {(e.items || []).map((item, idx) => (
+                        <span
+                          key={`${e.id}-${idx}-${item}`}
+                          style={{
+                            display: "inline-flex",
+                            alignItems: "center",
+                            padding: "4px 10px",
+                            borderRadius: 999,
+                            background: "rgba(30,91,191,0.12)",
+                            border: "1px solid rgba(30,91,191,0.20)",
+                            fontSize: 12,
+                            fontWeight: 600,
+                          }}
+                        >
+                          {item}
+                        </span>
+                      ))}
+                    </div>
+
+                    <div className="historyRow__sub" style={{ marginTop: 6 }}>
+                      Källa: {e.source === "import" ? "Import" : "Manuell"} ·{" "}
+                      {e.createdAt
+                        ? new Date(e.createdAt).toLocaleDateString()
+                        : "-"}
+                    </div>
+                  </div>
+
+                  {user.role === "admin" && (
+                    <button
+                      className="btn btn--danger"
+                      onClick={() => deleteEntry(e.id)}
+                    >
+                      Ta bort
+                    </button>
+                  )}
+                </div>
+              ))}
+            </div>
           </div>
         ))}
       </div>
     </div>
-  );}
+  );
+}
+
 
 /* ================= Page: Admin ================= */
 function AdminPage({ user, teamId }) {
@@ -2472,49 +2830,6 @@ function AdminInner({ user, teamId }) {
     setNewUserPin("");
 
     alert("Användare skapad ✅");
-  };
-
-  /* ================= CATALOG ================= */
-  const [catalog, setCatalog] = useState(loadCatalog());
-  const [prodName, setProdName] = useState("");
-  const [prodCat, setProdCat] = useState("");
-  const [prodPrice, setProdPrice] = useState("");
-
-  const addCatalogItem = () => {
-    const price = Number(prodPrice);
-    if (!prodName.trim() || !prodCat.trim() || !Number.isFinite(price)) return;
-
-    const next = [
-      ...catalog,
-      {
-        id: uuid(),
-        name: prodName.trim(),
-        category: prodCat.trim(),
-        price,
-        active: true,
-      },
-    ];
-
-    setCatalog(next);
-    saveCatalog(next);
-
-    setProdName("");
-    setProdCat("");
-    setProdPrice("");
-  };
-
-  const toggleCatalog = (id) => {
-    const next = catalog.map((p) =>
-      p.id === id ? { ...p, active: !p.active } : p
-    );
-    setCatalog(next);
-    saveCatalog(next);
-  };
-
-  const removeCatalog = (id) => {
-    const next = catalog.filter((p) => p.id !== id);
-    setCatalog(next);
-    saveCatalog(next);
   };
 
   /* ================= RENDER ================= */
@@ -2559,87 +2874,7 @@ function AdminInner({ user, teamId }) {
         </div>
       </div>
 
-      {/* ===== KATALOG FÖR LEDARKLÄDER ===== */}
-      <div className="card">
-        <div className="card__top">
-          <div className="card__title">Ledarkläder – Katalog</div>
-        </div>
-
-        {/* Lägg till produkt */}
-        <div className="formGrid" style={{ marginTop: 10 }}>
-          <div className="field">
-            <span>Namn</span>
-            <input
-              value={prodName}
-              onChange={(e) => setProdName(e.target.value)}
-              placeholder="T.ex. Halvzip"
-            />
-          </div>
-
-          <div className="field">
-            <span>Kategori</span>
-            <select
-              value={prodCat}
-              onChange={(e) => setProdCat(e.target.value)}
-            >
-              <option value="">Välj kategori</option>
-              <option value="Startpaket">Startpaket</option>
-              <option value="Vartannat år">Vartannat år</option>
-              <option value="Tillval">Tillval</option>
-            </select>
-          </div>
-
-          <div className="field">
-            <span>Pris (valfritt)</span>
-            <input
-              value={prodPrice}
-              onChange={(e) => setProdPrice(e.target.value)}
-              inputMode="numeric"
-              placeholder="T.ex. 599"
-            />
-          </div>
-
-          <button className="btn btn--primary" onClick={addCatalogItem}>
-            Lägg till produkt
-          </button>
-        </div>
-
-        {/* Lista produkter */}
-        <div className="history" style={{ marginTop: 12 }}>
-          {catalog.length === 0 && (
-            <div className="empty">Inga produkter ännu</div>
-          )}
-
-          {catalog.map((p) => (
-            <div key={p.id} className="historyRow">
-              <div>
-                <div className="historyRow__title">
-                  {p.name} {p.price ? `· ${p.price} kr` : ""}
-                </div>
-                <div className="historyRow__sub">
-                  {p.category} · {p.active ? "Aktiv" : "Inaktiv"}
-                </div>
-              </div>
-
-              <div style={{ display: "flex", gap: 8 }}>
-                <button
-                  className="btn btn--ghost"
-                  onClick={() => toggleCatalog(p.id)}
-                >
-                  {p.active ? "Inaktivera" : "Aktivera"}
-                </button>
-
-                <button
-                  className="btn btn--danger"
-                  onClick={() => removeCatalog(p.id)}
-                >
-                  Ta bort
-                </button>
-              </div>
-            </div>
-          ))}
-        </div>
-      </div>
+      
 
     </div>
   );
