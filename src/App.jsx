@@ -66,6 +66,9 @@ async function importLeaderClothesExcel(file) {
 
   let created = 0;
 
+  // === 1. Bygg upp nya data per lag ===
+  const perTeam = {};
+
   for (const r of rows) {
     const leaderName = String(r.Namn ?? "").trim();
     const teamId = String(r.Lag ?? "").trim();
@@ -85,9 +88,11 @@ async function importLeaderClothesExcel(file) {
 
     if (items.length === 0) continue;
 
-    const existing = await apiLoadIssued(teamId);
+    if (!perTeam[teamId]) {
+      perTeam[teamId] = [];
+    }
 
-    const entry = {
+    perTeam[teamId].push({
       id: uuid(),
       teamId,
       leaderName,
@@ -95,18 +100,19 @@ async function importLeaderClothesExcel(file) {
       items,
       createdAt: new Date().toISOString(),
       source: "import",
-    };
-
-    await apiSaveIssued(teamId, [
-      entry,
-      ...(existing || []),
-    ]);
+    });
 
     created++;
   }
 
+  // === 2. SPARA → ERSÄTT HELT ===
+  for (const teamId of Object.keys(perTeam)) {
+    await apiSaveIssued(teamId, perTeam[teamId]);
+  }
+
   return created;
 }
+
 
 
 /* ================= Utilities ================= */
