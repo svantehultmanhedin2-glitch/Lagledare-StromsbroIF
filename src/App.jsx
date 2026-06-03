@@ -870,6 +870,7 @@ function WarehouseMatchkitPage({ user }) {
 
   // filter
   const [showGoalkeepersOnly, setShowGoalkeepersOnly] = useState(false);
+  const [showAvailableOnly, setShowAvailableOnly] = useState(false);
   const [qNumber, setQNumber] = useState("");
   const [qSize, setQSize] = useState("all");
 
@@ -908,15 +909,20 @@ function WarehouseMatchkitPage({ user }) {
   }, [jerseys]);
 
   const filteredJerseys = useMemo(() => {
-    const numberQuery = qNumber.trim();
+  const numberQuery = qNumber.trim();
 
-    return jerseys.filter((i) => {
-      if (numberQuery && !String(i.number).includes(numberQuery)) return false;
-      if (qSize !== "all" && i.size !== qSize) return false;
-      if (showGoalkeepersOnly && i.position !== "goalkeeper") return false;
-      return true;
-    });
-  }, [jerseys, qNumber, qSize, showGoalkeepersOnly]);
+  return jerseys.filter((i) => {
+    if (numberQuery && !String(i.number).includes(numberQuery)) return false;
+    if (qSize !== "all" && i.size !== qSize) return false;
+
+    if (showGoalkeepersOnly && i.position !== "goalkeeper") return false;
+
+    // ✅ NY FILTER
+    if (showAvailableOnly && i.status !== "available") return false;
+
+    return true;
+  });
+}, [jerseys, qNumber, qSize, showGoalkeepersOnly, showAvailableOnly]);
 
   const availableCount = jerseys.filter((j) => j.status === "available").length;
   const assignedCount = jerseys.length - availableCount;
@@ -1353,6 +1359,9 @@ function WarehouseMatchkitPage({ user }) {
             style={{ fontSize: 12, marginTop: 8, display: "flex", gap: 12, flexWrap: "wrap" }}
           >
             <span>Visar {filteredJerseys.length} tröjor</span>
+            {showAvailableOnly && (
+  <span style={{ color: "#22c55e" }}>• Endast lediga</span>
+)}
             <span>Markerade {selectedJerseyIds.length}</span>
           </div>
         </div>
@@ -1381,6 +1390,13 @@ function WarehouseMatchkitPage({ user }) {
           >
             {showGoalkeepersOnly ? "Visa alla" : "🥅 Målvakter"}
           </button>
+
+<button
+  className={`btn ${showAvailableOnly ? "btn--ok" : "btn--ghost"}`}
+  onClick={() => setShowAvailableOnly((prev) => !prev)}
+>
+  {showAvailableOnly ? "Visa alla" : "Endast lediga"}
+</button>
 
           <button
             className="iconBtn"
@@ -3121,30 +3137,36 @@ function ReportsInner({ user, teamId, teamsAll }) {
      LEDARKLÄDER (NY LOGIK)
   ========================= */
 
-  async function buildLeaderClothesRows(scope) {
-    const rows = [];
+async function buildLeaderClothesRows(scope) {
+  const rows = [];
 
-    const targets = scope === "all" ? teamsAll : [team];
+  const targets = scope === "all" ? teamsAll : [team];
 
-    for (const t of targets) {
-      const issued = await apiLoadIssued(t.id);
+  for (const t of targets) {
+    const issued = await apiLoadIssued(t.id);
 
-      (issued ?? []).forEach((entry) => {
-        entry.items?.forEach((item) => {
-          rows.push({
-            Lag: t.name,
-            Ledare: entry.leaderName,
-            Plagg: item.name,
-            Antal: item.quantity ?? 1,
-            Datum: new Date(entry.createdAt).toLocaleDateString(),
-            Källa: entry.source,
-          });
+    (Array.isArray(issued) ? issued : []).forEach((entry) => {
+      const leaderName = entry.leaderName ?? "";
+      const year = entry.year ?? "";
+      const items = Array.isArray(entry.items) ? entry.items : [];
+
+      items.forEach((item) => {
+        rows.push({
+          Lag: t.name,
+          Ledare: leaderName,
+          År: year,
+          Plagg: item,
+          Datum: entry.createdAt
+            ? new Date(entry.createdAt).toLocaleDateString()
+            : "",
+          Källa: entry.source ?? "",
         });
       });
-    }
-
-    return rows;
+    });
   }
+
+  return rows;
+}
 
   /* =========================
      MATCHKLÄDER
