@@ -257,8 +257,7 @@ async function parseMatchkitExcel(file) {
 const DEFAULT_TEAMS = [
   { id: "A-lag Dam", name: "A-lag Dam" },
   { id: "Herr", name: "Herr" },
-  { id: "P10", name: "P10" },
-{ id: "P11", name: "P11" },
+  { id: "P10/11", name: "P10/11" },
 { id: "F11/12", name: "F11/12" },
 { id: "P12", name: "P12" },
 { id: "P13", name: "P13" },
