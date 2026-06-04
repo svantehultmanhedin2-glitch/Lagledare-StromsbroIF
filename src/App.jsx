@@ -2739,7 +2739,11 @@ const saveTeamExtrasWithWarehouse = async (nextTeamExtras) => {
           gap: 10,
         }}
       >
-        {filteredItems.map((it) => (
+        {[...filteredItems]
+  .slice()
+  .sort((a, b) => a.number - b.number)
+  .map((it) => (
+
           <div
             key={it.id}
             className="card"
