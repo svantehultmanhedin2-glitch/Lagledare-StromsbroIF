@@ -3751,6 +3751,7 @@ async function buildLeaderClothesRows(scope) {
      MATCHKLÄDER
   ========================= */
 
+
   async function buildMatchKitRows(scope) {
     const rows = [];
 
@@ -3771,7 +3772,35 @@ async function buildLeaderClothesRows(scope) {
 
     return rows;
   }
+async function buildTeamExtrasRows(scope) {
+  const rows = [];
 
+  const targets = scope === "all" ? teamsAll : [team];
+
+  for (const t of targets) {
+    const extras = await apiLoadTeamExtras(t.id);
+
+    (extras?.shorts ?? []).forEach((x) => {
+      rows.push({
+        Lag: t.name,
+        Typ: "Shorts",
+        Storlek: x.size,
+        Antal: x.qty,
+      });
+    });
+
+    (extras?.socks ?? []).forEach((x) => {
+      rows.push({
+        Lag: t.name,
+        Typ: "Strumpor",
+        Storlek: x.size,
+        Antal: x.qty,
+      });
+    });
+  }
+
+  return rows;
+}
   /* =========================
      EXPORT
   ========================= */
@@ -3803,6 +3832,16 @@ async function buildLeaderClothesRows(scope) {
       `lagkassa-${scope === "all" ? "alla-lag" : teamId}-${date}.xlsx`
     );
   };
+
+const exportTeamExtras = async () => {
+  const rows = await buildTeamExtrasRows(scope);
+
+  exportXlsx(
+    "Lag-shorts-strumpor",
+    rows,
+    `lag-extras-${scope === "all" ? "alla-lag" : teamId}-${date}.xlsx`
+  );
+};
 
   /* =========================
      RENDER
@@ -3836,6 +3875,11 @@ async function buildLeaderClothesRows(scope) {
           <button className="btn btn--primary" onClick={exportMatchKit}>
             Export Matchkläder
           </button>
+
+          <button className="btn btn--ghost" onClick={exportTeamExtras}>
+            Export Shorts & Strumpor
+          </button>
+
 
           <button className="btn btn--ghost" onClick={exportCash}>
             Export Lagkassa
