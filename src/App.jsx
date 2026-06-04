@@ -486,6 +486,78 @@ async function moveMatchKit(fromTeamId, toTeamId, ids) {
   await apiSaveMatchKit(toTeamId, [...to, ...moving]);
 }
 
+// ===== enkel tilldelning =====
+  async function assignJerseyWithExtras(jerseyId, teamId, extras) {
+    const warehouse = normalizeWarehouse(await apiLoadWarehouse());
+    const { jerseys, stock } = splitWarehouse(warehouse);
+
+    const jersey = jerseys.find((j) => j.id === jerseyId);
+    if (!jersey || jersey.status !== "available") {
+      alert("Tröjan är inte tillgänglig");
+      return null;
+    }
+
+    const want = [];
+    if (extras?.shorts?.size) {
+      want.push({ kind: "shorts", size: extras.shorts.size, qty: 1 });
+    }
+    if (extras?.socks?.size) {
+      want.push({ kind: "socks", size: extras.socks.size, qty: 1 });
+    }
+
+    for (const w of want) {
+      const have = getStockQty(stock, w.kind, w.size);
+      if (have < w.qty) {
+        alert(
+          `Inte tillräckligt i lager: ${kindLabel(w.kind)} ${w.size} (har ${have}, behöver ${w.qty})`
+        );
+        return null;
+      }
+    }
+
+    let nextWarehouse = warehouse;
+    for (const w of want) {
+      const res = adjustStock(nextWarehouse, w.kind, w.size, -w.qty);
+      if (!res.ok) {
+        alert("Kunde inte dra från lager.");
+        return null;
+      }
+      nextWarehouse = res.next;
+    }
+
+    nextWarehouse = nextWarehouse.map((x) =>
+      x.type === "jersey" && x.id === jerseyId
+        ? { ...x, status: "assigned", teamId }
+        : x
+    );
+
+    const teamItemsRaw = await apiLoadMatchKit(teamId);
+    const teamItems = normalizeMatchkit(teamItemsRaw);
+
+    const teamItem = {
+      id: jersey.id,
+      kind: "jersey",
+      position: jersey.position ?? "outfield",
+      number: jersey.number,
+      size: jersey.size,
+      playerName: "",
+      extras: {
+        shorts:
+          extras?.shorts?.size && extras.shorts.qty > 0
+            ? { size: extras.shorts.size, qty: Math.floor(extras.shorts.qty) }
+            : null,
+        socks:
+          extras?.socks?.size && extras.socks.qty > 0
+            ? { size: extras.socks.size, qty: Math.floor(extras.socks.qty) }
+            : null,
+      },
+    };
+
+    await apiSaveMatchKit(teamId, [teamItem, ...teamItems]);
+    await apiSaveWarehouse(nextWarehouse);
+
+    return nextWarehouse;
+  }
 
 /* ================= Team extras (shorts/strumpor per lag) ================= */
 
@@ -1146,79 +1218,7 @@ function WarehouseMatchkitPage({ user }) {
     await apiSaveWarehouse(next);
   };
 
-  // ===== enkel tilldelning =====
-  async function assignJerseyWithExtras(jerseyId, teamId, extras) {
-    const warehouse = normalizeWarehouse(await apiLoadWarehouse());
-    const { jerseys, stock } = splitWarehouse(warehouse);
-
-    const jersey = jerseys.find((j) => j.id === jerseyId);
-    if (!jersey || jersey.status !== "available") {
-      alert("Tröjan är inte tillgänglig");
-      return null;
-    }
-
-    const want = [];
-    if (extras?.shorts?.size) {
-      want.push({ kind: "shorts", size: extras.shorts.size, qty: 1 });
-    }
-    if (extras?.socks?.size) {
-      want.push({ kind: "socks", size: extras.socks.size, qty: 1 });
-    }
-
-    for (const w of want) {
-      const have = getStockQty(stock, w.kind, w.size);
-      if (have < w.qty) {
-        alert(
-          `Inte tillräckligt i lager: ${kindLabel(w.kind)} ${w.size} (har ${have}, behöver ${w.qty})`
-        );
-        return null;
-      }
-    }
-
-    let nextWarehouse = warehouse;
-    for (const w of want) {
-      const res = adjustStock(nextWarehouse, w.kind, w.size, -w.qty);
-      if (!res.ok) {
-        alert("Kunde inte dra från lager.");
-        return null;
-      }
-      nextWarehouse = res.next;
-    }
-
-    nextWarehouse = nextWarehouse.map((x) =>
-      x.type === "jersey" && x.id === jerseyId
-        ? { ...x, status: "assigned", teamId }
-        : x
-    );
-
-    const teamItemsRaw = await apiLoadMatchKit(teamId);
-    const teamItems = normalizeMatchkit(teamItemsRaw);
-
-    const teamItem = {
-      id: jersey.id,
-      kind: "jersey",
-      position: jersey.position ?? "outfield",
-      number: jersey.number,
-      size: jersey.size,
-      playerName: "",
-      extras: {
-        shorts:
-          extras?.shorts?.size && extras.shorts.qty > 0
-            ? { size: extras.shorts.size, qty: Math.floor(extras.shorts.qty) }
-            : null,
-        socks:
-          extras?.socks?.size && extras.socks.qty > 0
-            ? { size: extras.socks.size, qty: Math.floor(extras.socks.qty) }
-            : null,
-      },
-    };
-
-    await apiSaveMatchKit(teamId, [teamItem, ...teamItems]);
-    await apiSaveWarehouse(nextWarehouse);
-
-    return nextWarehouse;
-  }
-
+  
   // ===== batch-tilldelning med extras =====
   async function assignMultipleJerseysWithExtras(teamId, jerseyIds, extras) {
     const ids = Array.isArray(jerseyIds) ? jerseyIds : [];
@@ -2065,7 +2065,7 @@ function MatchKitPage({ user, teamId, teamsVisible }) {
 
   // Huvudlager behövs för lagerstatus på shorts/strumpor
   const [warehouseItems, setWarehouseItems] = useState([]);
-
+const [assignFromWarehouseOpen, setAssignFromWarehouseOpen] = useState(false);
   // Lagets shorts/strumpor (på lag-nivå)
 const [teamExtras, setTeamExtras] = useState({
   shorts: [],
@@ -2132,6 +2132,9 @@ const [draftTeamExtras, setDraftTeamExtras] = useState({
   socks: [],
 });
 
+const [assignSizeFilter, setAssignSizeFilter] = useState("all");
+const [assignOnlyGoalkeepers, setAssignOnlyGoalkeepers] = useState(false);
+
   // Flytta markerade tröjor
   const [selected, setSelected] = useState([]);
   const [importMode, setImportMode] = useState("replace");
@@ -2184,7 +2187,13 @@ const [draftTeamExtras, setDraftTeamExtras] = useState({
   }, [teamId, teamsVisible]);
 
   const stock = useMemo(() => splitWarehouse(warehouseItems).stock, [warehouseItems]);
+const assignSizes = useMemo(() => {
+  const all = splitWarehouse(warehouseItems).jerseys
+    .map(j => j.size)
+    .filter(Boolean);
 
+  return [...new Set(all)].sort((a, b) => a.localeCompare(b, "sv"));
+}, [warehouseItems]);
   const assignedCount = useMemo(
     () => items.filter((i) => String(i.playerName || "").trim()).length,
     [items]
@@ -2207,35 +2216,12 @@ const [draftTeamExtras, setDraftTeamExtras] = useState({
     await apiSaveMatchKit(teamId, next);
   };
 
-  // Lägg till tröja manuellt i lagets lista
-  const addItem = async () => {
-    if (!isAdmin) return;
+const reloadMatchKit = async () => {
+  const data = await apiLoadMatchKit(teamId);
+  setItems(normalizeMatchkit(data));
+};
 
-    const number = Number(prompt("Tröjnummer?"));
-    const size = (prompt("Storlek (t.ex. 152, S, M)?") || "").trim();
-    if (!Number.isFinite(number) || !size) return;
-
-    const type = prompt("Typ av tröja?\n\n1 = Utespelare\n2 = Målvakt", "1");
-    if (!type) return;
-
-    const isKeeper = type === "2";
-
-    const next = [
-      ...items,
-      {
-        id: uuid(),
-        kind: "jersey",
-        number,
-        size,
-        playerName: "",
-        position: isKeeper ? "goalkeeper" : "outfield",
-        extras: { shorts: null, socks: null }, // kvar i datan för bakåtkompatibilitet, men används ej i UI
-      },
-    ];
-
-    await persist(next);
-  };
-
+  
   // Uppdatera enstaka tröja
 
 const updateItem = async (id, patch) => {
@@ -2394,6 +2380,161 @@ const saveTeamExtrasWithWarehouse = async (nextTeamExtras) => {
         </div>
         <div className="summarySub">Tilldelade / Totalt</div>
       </div>
+      
+{assignFromWarehouseOpen && (
+  <div className="card" style={{ marginTop: 12 }}>
+
+    <div className="card__top">
+      <div className="card__title">Tilldela från huvudlager</div>
+
+      <button
+        className="btn btn--ghost"
+        onClick={() => setAssignFromWarehouseOpen(false)}
+      >
+        Stäng
+      </button>
+    </div>
+
+    {/* 🔍 FILTRERING */}
+    <div className="formGrid" style={{ marginTop: 10 }}>
+      <div className="field">
+       <span>Storlek</span>
+<select
+  value={assignSizeFilter}
+  onChange={(e) => setAssignSizeFilter(e.target.value)}
+>
+  <option value="all">Alla</option>
+
+  {assignSizes.map(s => (
+    
+<option key={s} value={s}>
+  {s} ({splitWarehouse(warehouseItems).jerseys.filter(j => j.size === s && j.status === "available").length})
+</option>
+
+  ))}
+</select>
+
+      </div>
+
+      <div className="field">
+        <span>Filter</span>
+        <button
+          className={`btn ${assignOnlyGoalkeepers ? "btn--ok" : "btn--ghost"}`}
+          onClick={() => setAssignOnlyGoalkeepers((prev) => !prev)}
+        >
+          {assignOnlyGoalkeepers ? "Visa alla" : "🥅 Målvakter"}
+        </button>
+      </div>
+    </div>
+
+
+<div className="muted" style={{ fontSize: 12 }}>
+  Visar {
+    splitWarehouse(warehouseItems).jerseys
+      .filter(j => j.status === "available")
+      .filter(j => assignSizeFilter === "all" || j.size === assignSizeFilter)
+      .filter(j => !assignOnlyGoalkeepers || j.position === "goalkeeper")
+      .length
+  } tröjor
+  {assignSizeFilter !== "all" && ` · storlek ${assignSizeFilter}`}
+</div>
+
+
+
+    {/* 📋 LISTA */}
+    <div className="history" style={{ marginTop: 10 }}>
+
+      {splitWarehouse(warehouseItems).jerseys
+        .filter(j => j.status === "available")
+
+        // ✅ sökfilter
+        .filter(j => {
+          if (assignSizeFilter === "all") return true;
+          return j.size === assignSizeFilter;
+        })
+
+
+        // ✅ målvaktsfilter
+        .filter(j => {
+          if (!assignOnlyGoalkeepers) return true;
+          return j.position === "goalkeeper";
+        })
+
+        // ✅ sortering (bonus)
+        .sort((a, b) => a.number - b.number)
+
+        .map(j => (
+          <div
+            key={j.id}
+            className="historyRow"
+            style={{
+              borderRadius: 12,
+              marginBottom: 6,
+            }}
+          >
+
+            {/* INFO */}
+            <div>
+              <div className="historyRow__title">
+                #{j.number} · {j.size}
+                {j.position === "goalkeeper" && " 🥅"}
+              </div>
+
+              <div className="historyRow__sub">
+                Tillgänglig i huvudlager
+              </div>
+            </div>
+
+            {/* ACTION */}
+            <button
+              className="btn btn--ok"
+              onClick={async () => {
+                const res = await assignJerseyWithExtras(
+                  j.id,
+                  teamId,
+                  {
+                    shorts: null,
+                    socks: null,
+                  }
+                );
+
+                if (!res) return;
+
+                setWarehouseItems(res);
+                await reloadMatchKit();
+              }}
+            >
+              Tilldela
+            </button>
+
+          </div>
+        ))}
+
+    </div>
+
+    {/* empty state */}
+    {splitWarehouse(warehouseItems).jerseys
+      .filter(j => j.status === "available")
+      .filter(j => assignSizeFilter === "all" || j.size === assignSizeFilter)
+
+      .filter(j => !assignOnlyGoalkeepers || j.position === "goalkeeper")
+      .length === 0 && (
+      <div className="empty" style={{ marginTop: 10 }}>
+        Inga tröjor hittades
+      </div>
+    )}
+  </div>
+)}
+
+<div style={{ marginTop: 8 }}>
+  <button
+    className="iconBtn"
+    title="Lägg till från huvudlager"
+    onClick={() => setAssignFromWarehouseOpen(true)}
+  >
+    ➕
+  </button>
+</div>
 
       {/* Lag-nivå shorts/strumpor */}
       <div className="card" style={{ marginTop: 12 }}>
@@ -2744,27 +2885,6 @@ const saveTeamExtrasWithWarehouse = async (nextTeamExtras) => {
       {/* Åtgärder */}
       <div className="card" style={{ marginTop: 12 }}>
         <div className="card__title">Åtgärder</div>
-
-        <div className="btnRow">
-          <button
-            className="btn btn--primary"
-            onClick={addItem}
-            disabled={!isAdmin}
-          >
-            Lägg till tröja
-          </button>
-
-          <button
-            className="btn btn--ghost"
-            onClick={() =>
-              alert(
-                "Admin kan lägga till tröjor, ändra storlek, flytta tröjor mellan lag och returnera till huvudlager. Shorts och strumpor hanteras nu på lag-nivå överst på sidan."
-              )
-            }
-          >
-            Info
-          </button>
-        </div>
 
         {isAdmin && (
           <>
