@@ -613,38 +613,9 @@ async function updateMatchKitExtras(teamId, jerseyId, extras) {
 }
 
 
-/* Import matchkit excel (expected columns: nummer, storlek, spelare optional) */
-const importMatchKitExcel = async (file, mode) => {
-  const parsed = await parseMatchkitExcel(file);
-
-  const incoming = parsed.map((x) => ({
-    id: uuid(),
-    number: x.number,
-    size: x.size,
-    playerName: x.playerName || "",
-  }));
-
-  const next =
-    mode === "replace"
-      ? incoming
-      : [...items, ...incoming];
-
-  // ✅ uppdatera UI direkt
-  setItems(next);
-
-  // ✅ spara till backend (Upstash)
-  await apiSaveMatchKit(teamId, next);
-
-  return incoming.length;
-};
 /* ================= Leader clothes: catalog, budget, issued, orders ================= */
 const catalogKey = "catalog:leaderclothes";
-function loadCatalog() {
-  return jget(catalogKey, []);
-}
-function saveCatalog(list) {
-  jset(catalogKey, list);
-}
+
 
 function issuedKey(teamId) {
   return `leaderclothes:${teamId}`;
@@ -728,25 +699,10 @@ async function buildReportForAllTeams() {
   for (const team of DEFAULT_TEAMS) {
     const teamId = team.id;
 
-    const orders = loadOrders(teamId);
+    
     const matchKit = await apiLoadMatchKit(teamId);
 
-    // Exempel: ledarkläder via orders
-    orders
-      .filter(o => o.status === "approved")
-      .forEach(o => {
-        o.items.forEach(item => {
-          rows.push({
-            lag: teamId,
-            produkt: item.name,
-            storlek: item.size,
-            pris: item.price,
-            typ: "Ledarkläder",
-          });
-        });
-      });
-
-    matchKit.forEach(mk => {
+     matchKit.forEach(mk => {
       rows.push({
         lag: teamId,
         nummer: mk.number,
@@ -2217,7 +2173,7 @@ const [draftTeamExtras, setDraftTeamExtras] = useState({
         if (!alive) return;
         setItems([]);
         setWarehouseItems([]);
-        setTeamExtras({ shorts: null, socks: null });
+        setTeamExtras({ shorts: [], socks: [] });
         setSelected([]);
       }
     })();
@@ -2281,10 +2237,20 @@ const [draftTeamExtras, setDraftTeamExtras] = useState({
   };
 
   // Uppdatera enstaka tröja
-  const updateItem = async (id, patch) => {
-    const next = items.map((i) => (i.id === id ? { ...i, ...patch } : i));
-    await persist(next);
-  };
+
+const updateItem = async (id, patch) => {
+  if ("size" in patch) {
+    console.warn("Storlek ändras endast i huvudlager");
+    return;
+  }
+
+  const next = items.map((i) =>
+    i.id === id ? { ...i, ...patch } : i
+  );
+
+  await persist(next);
+};
+
 
   // Flytta markerade tröjor mellan lag
   const moveMatchKitBetweenTeams = async (fromTeamId, toTeamId, ids) => {
@@ -2339,90 +2305,25 @@ const [draftTeamExtras, setDraftTeamExtras] = useState({
    * old -> läggs tillbaka
    * new -> dras ur lager
    */
-  const saveTeamExtrasWithWarehouse = async (nextTeamExtras) => {
-    const [latestWarehouseRaw, latestExtras] = await Promise.all([
-      apiLoadWarehouse(),
-      apiLoadTeamExtras(teamId),
-    ]);
-
-    let latestWarehouse = normalizeWarehouse(latestWarehouseRaw);
-    const currentExtras = {
-      shorts: latestExtras?.shorts ?? null,
-      socks: latestExtras?.socks ?? null,
-    };
-
-    const currentStock = splitWarehouse(latestWarehouse).stock;
-
-    const deltas = {};
-    const addDelta = (kind, size, delta) => {
-      if (!size || !delta) return;
-      const key = `${kind}|${size}`;
-      deltas[key] = (deltas[key] || 0) + delta;
-    };
-
-    // gamla tillbaka till lager
-    if (currentExtras.shorts?.size) {
-      addDelta("shorts", currentExtras.shorts.size, +(Number(currentExtras.shorts.qty) || 0));
-    }
-    if (currentExtras.socks?.size) {
-      addDelta("socks", currentExtras.socks.size, +(Number(currentExtras.socks.qty) || 0));
-    }
-
-    // nya dras ur lager
-    if (nextTeamExtras.shorts?.size) {
-      addDelta("shorts", nextTeamExtras.shorts.size, -(Number(nextTeamExtras.shorts.qty) || 0));
-    }
-    if (nextTeamExtras.socks?.size) {
-      addDelta("socks", nextTeamExtras.socks.size, -(Number(nextTeamExtras.socks.qty) || 0));
-    }
-
-    // kontrollera lager efter nettoförändring
-    for (const key of Object.keys(deltas)) {
-      const [kind, size] = key.split("|");
-      const delta = deltas[key];
-      const currentQty = getStockQty(currentStock, kind, size);
-      const nextQty = currentQty + delta;
-
-      if (nextQty < 0) {
-        alert(
-          `Inte tillräckligt i lager för ${kindLabel(kind)} ${size}. Har ${currentQty}, behöver ${Math.abs(delta)}.`
-        );
-        return null;
-      }
-    }
-
-    // tillämpa nettoändring
-    for (const key of Object.keys(deltas)) {
-      const [kind, size] = key.split("|");
-      const delta = deltas[key];
-
-      if (delta !== 0) {
-        const res = adjustStock(latestWarehouse, kind, size, delta);
-        if (!res.ok) {
-          alert(`Kunde inte uppdatera lager för ${kindLabel(kind)} ${size}.`);
-          return null;
-        }
-        latestWarehouse = res.next;
-      }
-    }
-
+const saveTeamExtrasWithWarehouse = async (nextTeamExtras) => {
+  try {
     const res = await updateTeamExtrasWithWarehouse(teamId, nextTeamExtras);
 
-if (!res) return;
+    if (!res) return;
 
-setWarehouseItems(res.warehouse);
-setTeamExtras(res.teamExtras);
+    // ✅ uppdatera UI EN gång
+    setWarehouseItems(res.warehouse);
+    setTeamExtras(res.teamExtras);
+    setDraftTeamExtras(res.teamExtras);
+    setEditingTeamExtras(false);
 
-    await apiSaveWarehouse(latestWarehouse);
+    return res;
 
-    setTeamExtras(nextTeamExtras);
-    setWarehouseItems(latestWarehouse);
-
-    return {
-      nextTeamExtras,
-      nextWarehouse: latestWarehouse,
-    };
-  };
+  } catch (err) {
+    console.error(err);
+    alert(err.message || "Kunde inte spara lagets shorts/strumpor.");
+  }
+};
 
   // Returnera tröja till huvudlager (utan individuell shorts/strump-logik)
   const returnToWarehouse = async (itemId) => {
