@@ -181,7 +181,12 @@ return {
   status: x.status ?? "available",
   teamId: x.teamId ?? null,
   note: x.note ?? "",
-  position: x.position ?? "outfield", // ✅ NY
+  
+position:
+  x.position === "goalkeeper"
+    ? "goalkeeper"
+    : "outfield",
+ // ✅ NY
   createdAt: x.createdAt ?? new Date().toISOString(),
 };
 
@@ -236,7 +241,12 @@ function normalizeMatchkit(list) {
   return (Array.isArray(list) ? list : []).map((it) => ({
     ...it,
     kind: it.kind ?? "jersey",
-    position: it.position ?? "outfield", // ✅ KRITISK FIX
+    
+position:
+  it.position === "goalkeeper"
+    ? "goalkeeper"
+    : "outfield",
+
     extras: it.extras ?? { shorts: null, socks: null },
   }));
 }
@@ -543,7 +553,7 @@ async function moveMatchKit(fromTeamId, toTeamId, ids) {
     const teamItem = {
       id: jersey.id,
       kind: "jersey",
-      position: jersey.position ?? "outfield",
+      position: jersey.position === "goalkeeper" ? "goalkeeper" : "outfield",
       number: jersey.number,
       size: jersey.size,
       playerName: "",
