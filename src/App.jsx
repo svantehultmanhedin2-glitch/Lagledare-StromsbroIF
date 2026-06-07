@@ -1192,9 +1192,7 @@ function WarehouseMatchkitPage({ user }) {
 
     if (!Number.isFinite(number) || !size) return;
 
-const isKeeper = confirm("Är detta en målvaktströja?");    if (!type) return;
-
-    const isKeeper = type === "2";
+const isKeeper = confirm("Är detta en målvaktströja?");
 
     const next = [
       {
