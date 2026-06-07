@@ -553,9 +553,9 @@ async function moveMatchKit(fromTeamId, toTeamId, ids) {
     const teamItem = {
       id: jersey.id,
       kind: "jersey",
-      position: jersey.position === "goalkeeper" ? "goalkeeper" : "outfield",
       number: jersey.number,
       size: jersey.size,
+      position: jersey.position === "goalkeeper" ? "goalkeeper" : "outfield",
       playerName: "",
       extras: {
         shorts:
@@ -1221,6 +1221,8 @@ const isKeeper = confirm("Är detta en målvaktströja?");
     setItems(next);
     await apiSaveWarehouse(next);
   };
+
+  
 
   // ===== ta bort tröja från huvudlager =====
   const removeJersey = async (id) => {
@@ -2167,7 +2169,7 @@ const [assignOnlyGoalkeepers, setAssignOnlyGoalkeepers] = useState(false);
           apiLoadWarehouse(),
           apiLoadTeamExtras(teamId),
         ]);
-console.log("LOADED MATCHKIT",
+
         if (!alive) return;
 
         setItems(normalizeMatchkit(matchkitData));

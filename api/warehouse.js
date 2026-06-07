@@ -36,6 +36,11 @@ function safeNormalize(list) {
         id: x.id ?? `${Date.now()}-${Math.random().toString(16).slice(2)}`,
         number,
         size,
+        position:
+          x.position === "goalkeeper"
+          ? "goalkeeper"
+          : "outfield", // ✅ KRITISK FIX
+
         status: x.status === "assigned" ? "assigned" : "available",
         teamId: x.teamId ?? null,
         note: x.note ?? "",
