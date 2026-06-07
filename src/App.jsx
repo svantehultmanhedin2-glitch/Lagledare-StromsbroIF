@@ -2167,7 +2167,7 @@ const [assignOnlyGoalkeepers, setAssignOnlyGoalkeepers] = useState(false);
           apiLoadWarehouse(),
           apiLoadTeamExtras(teamId),
         ]);
-
+console.log("LOADED MATCHKIT",
         if (!alive) return;
 
         setItems(normalizeMatchkit(matchkitData));
