@@ -136,10 +136,14 @@ const jset = (k, v) => {
   } catch {}
 };
 
+
 const STOCK_KINDS = [
   { id: "shorts", label: "Shorts" },
   { id: "socks", label: "Strumpor" },
+  { id: "gk-shorts", label: "Målvaktsshorts" },
+  { id: "gk-socks", label: "Målvaktsstrumpor" },
 ];
+
 
 const kindLabel = (k) => STOCK_KINDS.find(x => x.id === k)?.label ?? k;
 
@@ -227,13 +231,16 @@ function adjustStock(fullWarehouse, kind, size, delta) {
 }
 
 // matchkit extras back-compat
+
 function normalizeMatchkit(list) {
   return (Array.isArray(list) ? list : []).map((it) => ({
     ...it,
     kind: it.kind ?? "jersey",
+    position: it.position ?? "outfield", // ✅ KRITISK FIX
     extras: it.extras ?? { shorts: null, socks: null },
   }));
 }
+
 
 /* ================= Simple PIN hashing (local-only, not strong crypto) ================= */
 function hashPin(pin) {
@@ -1185,8 +1192,7 @@ function WarehouseMatchkitPage({ user }) {
 
     if (!Number.isFinite(number) || !size) return;
 
-    const type = prompt("Typ av tröja?\n\n1 = Utespelare\n2 = Målvakt", "1");
-    if (!type) return;
+const isKeeper = confirm("Är detta en målvaktströja?");    if (!type) return;
 
     const isKeeper = type === "2";
 
