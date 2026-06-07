@@ -2327,52 +2327,57 @@ const saveTeamExtrasWithWarehouse = async (nextTeamExtras) => {
 };
 
   // Returnera tröja till huvudlager (utan individuell shorts/strump-logik)
-  const returnToWarehouse = async (itemId) => {
-    if (!isAdmin) return;
+const returnToWarehouse = async (itemId) => {
+  if (!isAdmin) return;
 
-    const it = items.find((x) => x.id === itemId);
-    if (!it) return;
+  const it = items.find((x) => x.id === itemId);
+  if (!it) return;
 
-    if (!confirm("Returnera tröjan till huvudlager?")) return;
+  if (!confirm("Returnera tröjan till huvudlager?")) return;
 
-    // 1) bort från lagets matchkit
-    const nextTeam = items.filter((x) => x.id !== itemId);
-    setItems(nextTeam);
-    await apiSaveMatchKit(teamId, nextTeam);
+  // ✅ 1. Ta bort från lag
+  const nextTeam = items.filter((x) => x.id !== itemId);
+  setItems(nextTeam);
+  await apiSaveMatchKit(teamId, nextTeam);
 
-    // 2) tillbaka till huvudlager
-    let warehouse = normalizeWarehouse(await apiLoadWarehouse());
+  // ✅ 2. Hämta warehouse
+  let warehouse = normalizeWarehouse(await apiLoadWarehouse());
 
-    const jerseyExists = warehouse.some(
-      (x) => x.type === "jersey" && x.id === itemId
-    );
+  // ✅ 3. ALLTID uppdatera exakt denna tröja
+  let found = false;
 
-    if (jerseyExists) {
-      warehouse = warehouse.map((x) =>
-        x.type === "jersey" && x.id === itemId
-          ? { ...x, status: "available", teamId: null }
-          : x
-      );
-    } else {
-      warehouse = [
-        {
-          id: it.id,
-          type: "jersey",
-          number: it.number,
-          size: it.size,
-          position: it.position ?? "outfield",
-          status: "available",
-          teamId: null,
-          note: "",
-          createdAt: new Date().toISOString(),
-        },
-        ...warehouse,
-      ];
+  warehouse = warehouse.map((x) => {
+    if (x.type === "jersey" && x.id === itemId) {
+      found = true;
+      return {
+        ...x,
+        status: "available",
+        teamId: null,
+      };
     }
+    return x;
+  });
 
-    await apiSaveWarehouse(warehouse);
-    setWarehouseItems(warehouse);
-  };
+  // ✅ 4. Om tröjan saknas – lägg tillbaka den
+  if (!found) {
+    warehouse.unshift({
+      id: it.id,
+      type: "jersey",
+      number: it.number,
+      size: it.size,
+      position:
+        it.position === "goalkeeper"
+          ? "goalkeeper"
+          : "outfield",
+      status: "available",
+      teamId: null,
+      createdAt: new Date().toISOString(),
+    });
+  }
+
+  await apiSaveWarehouse(warehouse);
+  setWarehouseItems(warehouse);
+};
 
   // Hjälpare för ikonåtgärder
   const editPlayerName = async (item) => {
