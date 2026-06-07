@@ -2753,157 +2753,120 @@ const returnToWarehouse = async (itemId) => {
       </div>
 
       {/* Kompaktare kort */}
-      <div
-        className="grid"
-        style={{
-          gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
-          gap: 10,
-        }}
-      >
-        {[...filteredItems]
+      <div className="history" style={{ marginTop: 12 }}>
+        
+{[...filteredItems]
   .slice()
   .sort((a, b) => a.number - b.number)
   .map((it) => (
+    <div
+      key={it.id}
+      className="historyRow"
+      style={{
+        display: "grid",
+        gridTemplateColumns: "1fr auto auto",
+        gap: 10,
+        alignItems: "center",
+        padding: "8px 12px",
+        borderRadius: 12,
+        marginBottom: 6,
+        background: String(it.playerName || "").trim()
+          ? "rgba(34,197,94,.05)"
+          : "rgba(255,255,255,.02)",
+        border: "1px solid rgba(157,179,216,.12)",
+      }}
+    >
 
-          <div
-            key={it.id}
-            className="card"
-            style={{
-              padding: 12,
-              borderRadius: 14,
-            }}
+      {/* ✅ VÄNSTER – INFORMATION */}
+      <div style={{ display: "flex", flexDirection: "column" }}>
+
+        {/* RAD 1 */}
+        <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+          {it.position === "goalkeeper" && <span>🥅</span>}
+
+          <strong style={{ minWidth: 32 }}>
+            #{it.number}
+          </strong>
+
+          <span style={{ fontSize: 12, opacity: 0.8 }}>
+            📏 {it.size}
+          </span>
+
+          {/* ✅ Färg bara för målvakt */}
+          {it.position === "goalkeeper" && it.color && (
+            <span style={{ fontSize: 12, opacity: 0.8 }}>
+              🎨 {it.color}
+            </span>
+          )}
+        </div>
+
+        {/* RAD 2 */}
+        <div style={{ fontSize: 12, opacity: 0.8 }}>
+          👤 {it.playerName || "Ej tilldelad"}
+        </div>
+      </div>
+
+      {/* ✅ MITTEN – STATUS */}
+      <div>
+        {String(it.playerName || "").trim() ? (
+          <Pill tone="ok">Tilldelad</Pill>
+        ) : (
+          <Pill tone="neutral">Ledig</Pill>
+        )}
+      </div>
+
+      {/* ✅ HÖGER – ACTIONS */}
+      <div
+        style={{
+          display: "flex",
+          gap: 6,
+          alignItems: "center",
+          whiteSpace: "nowrap",
+        }}
+      >
+        {/* Tilldela / ändra spelare */}
+        <button
+          className="iconBtn"
+          title={it.playerName ? "Ändra spelare" : "Tilldela spelare"}
+          onClick={() => editPlayerName(it)}
+        >
+          👤
+        </button>
+
+        {/* Rensa spelare */}
+        {it.playerName && (
+          <button
+            className="iconBtn"
+            title="Frigör spelare"
+            onClick={() => clearPlayer(it)}
           >
-            <div
-              className="card__top"
-              style={{ alignItems: "flex-start", marginBottom: 8 }}
-            >
-              <div>
-                <div
-                  className="card__title"
-                  style={{ display: "flex", gap: 6, alignItems: "center" }}
-                >
-                  {it.position === "goalkeeper" && <span>🥅</span>}
-                  <span>#{it.number}</span>
-                </div>
+            🧹
+          </button>
+        )}
 
-<div
-  style={{
-    display: "flex",
-    gap: 8,
-    alignItems: "center",
-    flexWrap: "wrap",
-    marginTop: 4,
-  }}
->
-  {/* Storlek */}
-  <span
-    style={{
-      display: "inline-flex",
-      alignItems: "center",
-      gap: 4,
-      padding: "3px 8px",
-      borderRadius: 999,
-      fontSize: 12,
-      fontWeight: 700,
-      background: "rgba(157,179,216,.12)",
-      border: "1px solid rgba(157,179,216,.2)",
-    }}
-  >
-    📏 {it.size}
-  </span>
+        {/* Returnera */}
+        {isAdmin && (
+          <button
+            className="iconBtn"
+            title="Returnera till huvudlager"
+            onClick={() => returnToWarehouse(it.id)}
+          >
+            ↩️
+          </button>
+        )}
 
-  {/* Spelare */}
-  <span
-    style={{
-      display: "inline-flex",
-      alignItems: "center",
-      gap: 4,
-      padding: "3px 8px",
-      borderRadius: 999,
-      fontSize: 12,
-      fontWeight: 600,
-      background: it.playerName
-        ? "rgba(34,197,94,.12)"
-        : "rgba(255,255,255,.05)",
-      border: it.playerName
-        ? "1px solid rgba(34,197,94,.25)"
-        : "1px solid rgba(157,179,216,.15)",
-      opacity: it.playerName ? 1 : 0.7,
-    }}
-  >
-    👤 {it.playerName || "Ej tilldelad"}
-  </span>
-</div>
+        {/* Flytta */}
+        {isAdmin && (
+          <input
+            type="checkbox"
+            checked={selected.includes(it.id)}
+            onChange={() => toggleSelected(it.id)}
+          />
+        )}
+      </div>
+    </div>
+))}
 
-              </div>
-
-              {String(it.playerName || "").trim() ? (
-                <Pill tone="ok">Tilldelad</Pill>
-              ) : (
-                <Pill tone="neutral">Ledig</Pill>
-              )}
-            </div>
-
-            <div
-              style={{
-                display: "flex",
-                gap: 8,
-                flexWrap: "wrap",
-                alignItems: "center",
-                justifyContent: "space-between",
-              }}
-            >
-              <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-                <button
-                  className="iconBtn"
-                  title={it.playerName ? "Ändra spelare" : "Tilldela spelare"}
-                  onClick={() => editPlayerName(it)}
-                >
-                  👤
-                </button>
-
-                {it.playerName && (
-                  <button
-                    className="iconBtn"
-                    title="Frigör spelare"
-                    onClick={() => clearPlayer(it)}
-                  >
-                    🧹
-                  </button>
-                )}
-
-                {isAdmin && (
-                  <button
-                    className="iconBtn"
-                    title="Returnera till huvudlager"
-                    onClick={() => returnToWarehouse(it.id)}
-                  >
-                    ↩️
-                  </button>
-                )}
-              </div>
-
-              {isAdmin && (
-                <label
-                  title="Markera för flytt"
-                  style={{
-                    display: "inline-flex",
-                    alignItems: "center",
-                    gap: 6,
-                    fontSize: 12,
-                  }}
-                >
-                  <input
-                    type="checkbox"
-                    checked={selected.includes(it.id)}
-                    onChange={() => toggleSelected(it.id)}
-                  />
-                  Flytta
-                </label>
-              )}
-            </div>
-          </div>
-        ))}
       </div>
 
       {/* Åtgärder */}
