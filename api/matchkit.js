@@ -22,7 +22,12 @@ function safeNormalizeMatchkit(list) {
         kind: x.kind ?? "jersey",
         number: Number.isFinite(number) ? number : null,
         size,
-        playerName: String(x.playerName ?? ""),
+        playerName: String(x.playerName ?? ""), 
+      position:
+      x.position === "goalkeeper"
+      ? "goalkeeper"
+      : "outfield", // ✅ KRITISK
+
         extras: x.extras ?? { shorts: null, socks: null },
       };
     })
