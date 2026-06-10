@@ -2197,7 +2197,7 @@ function SportsGearPage({ user }) {
 
       map[key].qty += qtyNum;
 
-      // behåll senaste/tydligaste tröskelvärde om det finns dubletter
+      // Om samma rad finns flera gånger, behåll ett tydligt lowStockAt-värde
       if (thresholdNum > 0) {
         map[key].lowStockAt = thresholdNum;
       }
@@ -2239,9 +2239,7 @@ function SportsGearPage({ user }) {
     const next = [...items];
 
     const existing = next.find(
-      (x) =>
-        x.kind === kind &&
-        (x.size || "") === (size || "")
+      (x) => x.kind === kind && (x.size || "") === (size || "")
     );
 
     if (existing) {
@@ -2262,9 +2260,8 @@ function SportsGearPage({ user }) {
     setKind("");
     setSize("");
     setQty("");
-    setLowStockAt("");    
+    setLowStockAt("");
     setShowForm(false);
-
   };
 
   const updateGroupedQty = async (kindToChange, sizeToChange, delta) => {
@@ -2325,10 +2322,10 @@ function SportsGearPage({ user }) {
       return;
     }
 
-    // ta bort gamla raden
+    // Ta bort gamla raden
     let next = items.filter((x) => x.id !== row.id);
 
-    // om ny kombination redan finns → merge
+    // Om ny kombination redan finns → merge
     const existing = next.find(
       (x) =>
         x.kind === newKind &&
@@ -2356,50 +2353,47 @@ function SportsGearPage({ user }) {
     <div>
       {/* Översikt */}
       <div className="summaryCard">
-  <div
-    style={{
-      display: "flex",
-      justifyContent: "space-between",
-      alignItems: "center",
-      gap: 10,
-      flexWrap: "wrap",
-    }}
-  >
-    <div className="summaryTitle">Idrottsmaterial</div>
+        <div
+          style={{
+            display: "flex",
+            justifyContent: "space-between",
+            alignItems: "center",
+            gap: 10,
+            flexWrap: "wrap",
+          }}
+        >
+          <div className="summaryTitle">Idrottsmaterial</div>
 
-    {isAdmin && (
-      <button
-        className="btn btn--primary"
-        onClick={() => setShowForm(true)}
-        style={{ whiteSpace: "nowrap" }}
-      >
-        + Lägg till
-      </button>
-    )}
-  </div>
-   <div className="summaryValue">{items.length}</div>
+          {isAdmin && (
+            <button
+              className="btn btn--primary"
+              onClick={() => setShowForm(true)}
+              style={{ whiteSpace: "nowrap" }}
+            >
+              + Lägg till
+            </button>
+          )}
+        </div>
+
+        <div className="summaryValue">{items.length}</div>
         <div className="summarySub">
           Materialrader i lager · totalt {totalQty} st
         </div>
       </div>
-    
 
-
-      {/* Lägg till material */}
-     {isAdmin && showForm && (
+      {/* Form för ny rad */}
+      {isAdmin && showForm && (
         <div className="card" style={{ marginTop: 12 }}>
-          
-<div className="card__top">
-  <div className="card__title">Lägg till idrottsmaterial</div>
+          <div className="card__top">
+            <div className="card__title">Lägg till idrottsmaterial</div>
 
-  <button
-    className="btn btn--ghost"
-    onClick={() => setShowForm(false)}
-  >
-    Stäng
-  </button>
-</div>
-
+            <button
+              className="btn btn--ghost"
+              onClick={() => setShowForm(false)}
+            >
+              Stäng
+            </button>
+          </div>
 
           <div className="formGrid" style={{ marginTop: 10 }}>
             <div className="field">
@@ -2485,11 +2479,7 @@ function SportsGearPage({ user }) {
                   key={g.id}
                   className="historyRow"
                   style={{
-                    display: "grid",
-                    gridTemplateColumns: "1fr auto",
-                    gap: 10,
-                    alignItems: "center",
-                    padding: "8px 12px",
+                    padding: "10px 12px",
                     borderRadius: 12,
                     marginBottom: 6,
                     background: "rgba(30,91,191,.08)",
@@ -2543,15 +2533,23 @@ function SportsGearPage({ user }) {
                     style={{
                       display: "flex",
                       gap: 8,
-                      alignItems: "center",
                       justifyContent: "flex-end",
+                      marginTop: 10,
                     }}
                   >
-                    <button className="iconBtn ok" onClick={() => saveEditRow(g)}>
+                    <button
+                      className="iconBtn ok"
+                      style={{ minWidth: 36, minHeight: 36 }}
+                      onClick={() => saveEditRow(g)}
+                    >
                       ✅
                     </button>
 
-                    <button className="iconBtn" onClick={cancelEditRow}>
+                    <button
+                      className="iconBtn"
+                      style={{ minWidth: 36, minHeight: 36 }}
+                      onClick={cancelEditRow}
+                    >
                       ✖️
                     </button>
                   </div>
@@ -2564,11 +2562,7 @@ function SportsGearPage({ user }) {
                 key={g.id}
                 className="historyRow"
                 style={{
-                  display: "grid",
-                  gridTemplateColumns: "1fr auto",
-                  gap: 10,
-                  alignItems: "center",
-                  padding: "8px 12px",
+                  padding: "8px 10px",
                   borderRadius: 12,
                   marginBottom: 6,
                   background: low
@@ -2579,95 +2573,103 @@ function SportsGearPage({ user }) {
                     : "1px solid rgba(157,179,216,.12)",
                 }}
               >
-                {/* Vänster */}
-                <div style={{ minWidth: 0 }}>
-                  <div
-                    style={{
-                      fontSize: 14,
-                      fontWeight: 700,
-                      display: "flex",
-                      gap: 8,
-                      alignItems: "center",
-                      flexWrap: "wrap",
-                    }}
-                  >
-                    <span>{gearIcons[g.kind] || "📦"}</span>
-
-                    <span>
-                      {gearLabels[g.kind] || g.kind}
-                      {g.size ? ` – storlek ${g.size}` : ""}
-                    </span>
-                  </div>
-
-                  <div
-                    className="muted"
-                    style={{
-                      fontSize: 12,
-                      marginTop: 2,
-                      display: "flex",
-                      gap: 8,
-                      flexWrap: "wrap",
-                    }}
-                  >
-                    <span>Varningsnivå: {g.lowStockAt || 0}</span>
-
-                    {low && (
-                      <span style={{ color: "#ef4444", fontWeight: 700 }}>
-                        ⚠️ Lågt lager
-                      </span>
-                    )}
-                  </div>
-                </div>
-
-                {/* Höger */}
                 <div
                   style={{
                     display: "flex",
-                    gap: 8,
-                    alignItems: "center",
-                    justifyContent: "flex-end",
-                    whiteSpace: "nowrap",
+                    justifyContent: "space-between",
+                    gap: 10,
+                    alignItems: "flex-start",
+                    flexWrap: "wrap",
                   }}
                 >
-                  <strong style={{ minWidth: 50, textAlign: "right" }}>
-                    {g.qty} st
-                  </strong>
+                  {/* Info */}
+                  <div style={{ minWidth: 0, flex: "1 1 220px" }}>
+                    <div
+                      style={{
+                        display: "flex",
+                        gap: 8,
+                        alignItems: "center",
+                        flexWrap: "wrap",
+                        fontWeight: 700,
+                        fontSize: 14,
+                      }}
+                    >
+                      <span>{gearIcons[g.kind] || "📦"}</span>
+                      <span>{gearLabels[g.kind] || g.kind}</span>
+                    </div>
 
-                  {isAdmin && (
-                    <>
-                      <button
-                        className="iconBtn"
-                        title="Minska"
-                        onClick={() => updateGroupedQty(g.kind, g.size, -1)}
-                      >
-                        ➖
-                      </button>
+                    <div
+                      style={{
+                        fontSize: 12,
+                        opacity: 0.8,
+                        marginTop: 2,
+                        display: "flex",
+                        gap: 8,
+                        flexWrap: "wrap",
+                      }}
+                    >
+                      {g.size && <span>Storlek {g.size}</span>}
+                      <span>{g.qty} st</span>
+                      <span>Varningsnivå: {g.lowStockAt || 0}</span>
 
-                      <button
-                        className="iconBtn"
-                        title="Öka"
-                        onClick={() => updateGroupedQty(g.kind, g.size, +1)}
-                      >
-                        ➕
-                      </button>
+                      {low && (
+                        <span style={{ color: "#ef4444", fontWeight: 700 }}>
+                          ⚠️ Lågt lager
+                        </span>
+                      )}
+                    </div>
+                  </div>
 
-                      <button
-                        className="iconBtn"
-                        title="Redigera rad"
-                        onClick={() => startEditRow(g)}
-                      >
-                        ✏️
-                      </button>
+                  {/* Actions */}
+                  <div
+                    style={{
+                      display: "flex",
+                      gap: 8,
+                      alignItems: "center",
+                      justifyContent: "flex-end",
+                      marginTop: 4,
+                    }}
+                  >
+                    {isAdmin && (
+                      <>
+                        <button
+                          className="iconBtn"
+                          title="Minska"
+                          style={{ minWidth: 36, minHeight: 36 }}
+                          onClick={() => updateGroupedQty(g.kind, g.size, -1)}
+                        >
+                          ➖
+                        </button>
 
-                      <button
-                        className="iconBtn danger"
-                        title="Ta bort rad"
-                        onClick={() => removeGroupedRow(g.kind, g.size)}
-                      >
-                        🗑️
-                      </button>
-                    </>
-                  )}
+                        <button
+                          className="iconBtn"
+                          title="Öka"
+                          style={{ minWidth: 36, minHeight: 36 }}
+                          onClick={() => updateGroupedQty(g.kind, g.size, +1)}
+                        >
+                          ➕
+                        </button>
+
+                        <button
+                          className="iconBtn"
+                          title="Redigera rad"
+                          style={{ minWidth: 36, minHeight: 36 }}
+                          onClick={() => startEditRow(g)}
+                        >
+                          ✏️
+                        </button>
+
+                        <button
+                          className="iconBtn danger"
+                          title="Ta bort rad"
+                          style={{ minWidth: 36, minHeight: 36 }}
+                          onClick={() => removeGroupedRow(g.kind, g.size)}
+                        >
+                          🗑️
+                        </button>
+                      </>
+                    )}
+                  </div>
                 </div>
               </div>
             );
@@ -2677,7 +2679,6 @@ function SportsGearPage({ user }) {
     </div>
   );
 }
-
 
 /* ================= Page: Matchkit ================= */
 function MatchKitPage({ user, teamId, teamsVisible }) {
