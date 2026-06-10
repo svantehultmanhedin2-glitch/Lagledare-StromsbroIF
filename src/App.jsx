@@ -1100,6 +1100,9 @@ function WarehouseMatchkitPage({ user }) {
   // tool panels
   const [activeToolPanel, setActiveToolPanel] = useState(null); // null | "batch" | "import" | "stock"
 
+const isMobile = window.innerWidth < 700;
+const [showToolsMobile, setShowToolsMobile] = useState(false);
+
   // stock form (kontrollerade inputs)
   const [stockKindInput, setStockKindInput] = useState("shorts");
   const [stockSizeInput, setStockSizeInput] = useState("");
@@ -1117,6 +1120,28 @@ function WarehouseMatchkitPage({ user }) {
       </div>
     );
   }
+
+  useEffect(() => {
+  if (!isMobile) return;
+
+  let lastScrollY = window.scrollY;
+
+  const handleScroll = () => {
+    const currentY = window.scrollY;
+
+    // ✅ om man scrollar NER → stäng toolbars
+    if (currentY > lastScrollY && currentY > 100) {
+      setShowToolsMobile(false);
+    }
+
+    lastScrollY = currentY;
+  };
+
+  window.addEventListener("scroll", handleScroll);
+
+  return () => window.removeEventListener("scroll", handleScroll);
+}, [isMobile]);
+
 
   const { jerseys, stock } = splitWarehouse(items);
 
@@ -1440,11 +1465,37 @@ const isKeeper = confirm("Är detta en målvaktströja?");
     boxShadow: "0 2px 8px rgba(0,0,0,.35)",
   };
 
-  const stickyWrapStyle = {
-    position: "sticky",
-    top: 80, // justera till 76/80 om din topbar är högre
-    zIndex: 30,
-  };
+
+
+const stickyWrapStyle = {
+  position: isMobile ? "static" : "sticky",
+  top: isMobile ? "auto" : 80,
+  zIndex: 30,
+};
+
+{isMobile && (
+  <div
+    className="card"
+    style={{
+      marginBottom: 10,
+      padding: 10,
+      display: "flex",
+      justifyContent: "space-between",
+      alignItems: "center",
+    }}
+  >
+    <div style={{ fontWeight: 600 }}>
+      Verktyg
+    </div>
+
+    <button
+      className="btn btn--ghost"
+      onClick={() => setShowToolsMobile((p) => !p)}
+    >
+      {showToolsMobile ? "▲" : "▼"}
+    </button>
+  </div>
+)}
 
   const glassCardStyle = {
     background: "rgba(15,23,42,0.88)",
@@ -1457,162 +1508,154 @@ const isKeeper = confirm("Är detta en målvaktströja?");
   return (
     <div>
       {/* ===== STICKY STACK: sök + verktygsrad ===== */}
-      <div style={stickyWrapStyle}>
-        <div
-          className="card"
-          style={{
-            ...glassCardStyle,
-            marginBottom: 10,
-          }}
-        >
-          <div className="card__top">
-            <div className="card__title">Huvudlager – sök & filter</div>
-            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-              <Pill tone="neutral">Totalt {jerseys.length}</Pill>
-              <Pill tone="ok">Tillgängliga {availableCount}</Pill>
-              <Pill tone="warn">Tilldelade {assignedCount}</Pill>
-            </div>
-          </div>
+{/* ===== STICKY STACK: sök + verktygsrad ===== */}
+<div style={stickyWrapStyle}>
 
-          <div className="formGrid" style={{ marginTop: 10 }}>
-            <div className="field">
-              <span>Sök tröjnummer</span>
-              <input
-                value={qNumber}
-                onChange={(e) => setQNumber(e.target.value)}
-                placeholder="t.ex. 10"
-                inputMode="numeric"
-              />
-            </div>
+  {/* ✅ MOBIL TOGGLE */}
+  {isMobile && (
+    <div className="card" style={{ marginBottom: 10, padding: 10 }}>
+      <button
+        className="btn btn--ghost"
+        onClick={() => setShowToolsMobile((p) => !p)}
+        style={{ width: "100%" }}
+      >
+        {showToolsMobile ? "Dölj verktyg ▲" : "Visa verktyg ▼"}
+      </button>
+    </div>
+  )}
 
-            <div className="field">
-              <span>Storlek</span>
-              <select value={qSize} onChange={(e) => setQSize(e.target.value)}>
-                <option value="all">Alla</option>
-                {sizes.map((s) => (
-                  <option key={s} value={s}>
-                    {s}
-                  </option>
-                ))}
-              </select>
-            </div>
-          </div>
-
-          <div
-            className="muted"
-            style={{ fontSize: 12, marginTop: 8, display: "flex", gap: 12, flexWrap: "wrap" }}
-          >
-            <span>Visar {filteredJerseys.length} tröjor</span>
-            {showAvailableOnly && (
-  <span style={{ color: "#22c55e" }}>• Endast lediga</span>
-)}
-            <span>Markerade {selectedJerseyIds.length}</span>
+  {/* ✅ ALLA TOOLCARDS WRAPPADE I EN */}
+  {(!isMobile || showToolsMobile) && (
+    <>
+      {/* ===== SÖK / FILTER ===== */}
+      <div
+        className="card"
+        style={{
+          ...glassCardStyle,
+          marginBottom: 10,
+        }}
+      >
+        <div className="card__top">
+          <div className="card__title">Huvudlager – sök & filter</div>
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+            <Pill tone="neutral">Totalt {jerseys.length}</Pill>
+            <Pill tone="ok">Tillgängliga {availableCount}</Pill>
+            <Pill tone="warn">Tilldelade {assignedCount}</Pill>
           </div>
         </div>
 
-        <div
-          className="card"
-          style={{
-            ...glassCardStyle,
-            padding: 12,
-            display: "flex",
-            gap: 8,
-            alignItems: "center",
-            flexWrap: "wrap",
-            marginBottom: 12,
-            borderBottom: "1px solid rgba(157,179,216,0.12)",
-          }}
-        >
-          <button
-            className={`btn ${showGoalkeepersOnly ? "btn--ok" : "btn--ghost"}`}
-            onClick={() => setShowGoalkeepersOnly((prev) => !prev)}
-            style={{
-              boxShadow: showGoalkeepersOnly
-                ? "0 8px 20px rgba(34,197,94,.18)"
-                : "none",
-            }}
-          >
-            {showGoalkeepersOnly ? "Visa alla" : "🥅 Målvakter"}
-          </button>
-
-<button
-  className={`btn ${showAvailableOnly ? "btn--ok" : "btn--ghost"}`}
-  onClick={() => setShowAvailableOnly((prev) => !prev)}
->
-  {showAvailableOnly ? "Visa alla" : "Endast lediga"}
-</button>
-
-          <button
-            className="iconBtn"
-            title="Batch-tilldelning"
-            aria-label="Batch-tilldelning"
-            style={toolBtnStyle(activeToolPanel === "batch")}
-            onClick={() => toggleToolPanel("batch")}
-          >
-            🧺
-            {selectedJerseyIds.length > 0 && (
-              <span style={floatingBadgeStyle}>{selectedJerseyIds.length}</span>
-            )}
-          </button>
-
-          <button
-            className="iconBtn"
-            title="Importera"
-            aria-label="Importera"
-            style={toolBtnStyle(activeToolPanel === "import")}
-            onClick={() => toggleToolPanel("import")}
-          >
-            📥
-          </button>
-
-          <button
-            className="iconBtn"
-            title="Lager för shorts och strumpor"
-            aria-label="Lager för shorts och strumpor"
-            style={toolBtnStyle(activeToolPanel === "stock")}
-            onClick={() => toggleToolPanel("stock")}
-          >
-            📦
-          </button>
-
-          <button
-            className="iconBtn"
-            title="Lägg till tröja"
-            aria-label="Lägg till tröja"
-            style={toolBtnStyle(false)}
-            onClick={addManualJersey}
-          >
-            ➕
-          </button>
-
-          <button
-            className="iconBtn"
-            title="Uppdatera"
-            aria-label="Uppdatera"
-            style={toolBtnStyle(false)}
-            onClick={reload}
-          >
-            🔄
-          </button>
-
-          <div
-            style={{
-              marginLeft: "auto",
-              display: "flex",
-              gap: 8,
-              flexWrap: "wrap",
-            }}
-          >
-            <Pill tone="neutral">{filteredJerseys.length} visade</Pill>
-            {selectedJerseyIds.length > 0 && (
-              <Pill tone="ok">{selectedJerseyIds.length} markerade</Pill>
-            )}
+        <div className="formGrid" style={{ marginTop: 10 }}>
+          <div className="field">
+            <span>Sök tröjnummer</span>
+            <input
+              value={qNumber}
+              onChange={(e) => setQNumber(e.target.value)}
+              placeholder="t.ex. 10"
+            />
           </div>
+
+          <div className="field">
+            <span>Storlek</span>
+            <select value={qSize} onChange={(e) => setQSize(e.target.value)}>
+              <option value="all">Alla</option>
+              {sizes.map((s) => (
+                <option key={s} value={s}>{s}</option>
+              ))}
+            </select>
+          </div>
+        </div>
+
+        <div className="muted" style={{ fontSize: 12, marginTop: 8 }}>
+          Visar {filteredJerseys.length} tröjor
         </div>
       </div>
 
+      {/* ===== TOOLBAR ===== */}
+      <div
+        className="card"
+        style={{
+          ...glassCardStyle,
+          padding: isMobile ? 8 : 12,
+          display: "flex",
+          gap: isMobile ? 6 : 8,
+          flexWrap: "wrap",
+          marginBottom: 12,
+        }}
+      >
+        <button
+          className={`btn ${showGoalkeepersOnly ? "btn--ok" : "btn--ghost"}`}
+          onClick={() => setShowGoalkeepersOnly((p) => !p)}
+        >
+          🥅
+        </button>
+
+        <button
+          className={`btn ${showAvailableOnly ? "btn--ok" : "btn--ghost"}`}
+          onClick={() => setShowAvailableOnly((p) => !p)}
+        >
+          Lediga
+        </button>
+
+        <button
+          className="iconBtn"
+          onClick={() => toggleToolPanel("batch")}
+        >
+          🧺
+        </button>
+
+        <button
+          className="iconBtn"
+          onClick={() => toggleToolPanel("import")}
+        >
+          📥
+        </button>
+
+        <button
+          className="iconBtn"
+          onClick={() => toggleToolPanel("stock")}
+        >
+          📦
+        </button>
+
+        <button
+          className="iconBtn"
+          onClick={addManualJersey}
+        >
+          ➕
+        </button>
+
+        <button
+          className="iconBtn"
+          onClick={reload}
+        >
+          🔄
+        </button>
+
+        <div style={{ marginLeft: "auto" }}>
+          {selectedJerseyIds.length} markerade
+        </div>
+      </div>
+    </>
+  )}
+
+</div>
+
+
+{isMobile && (
+  <div className="card" style={{ marginBottom: 10, padding: 10 }}>
+    <button
+      className="btn btn--ghost"
+      onClick={() => setShowToolsMobile((p) => !p)}
+      style={{ width: "100%" }}
+    >
+      {showToolsMobile ? "Dölj verktyg ▲" : "Visa verktyg ▼"}
+    </button>
+  </div>
+)}
+
+
       {/* ===== VERKTYGSPANELER ===== */}
-      {activeToolPanel === "batch" && (
+      {(!isMobile || showToolsMobile) && activeToolPanel === "batch" && (
         <div className="card" style={{ marginTop: 0 }}>
           <div className="card__top">
             <div className="card__title">Batch-tilldelning</div>
@@ -1730,7 +1773,7 @@ const isKeeper = confirm("Är detta en målvaktströja?");
         </div>
       )}
 
-      {activeToolPanel === "import" && (
+      {(!isMobile || showToolsMobile) && activeToolPanel === "import" && (
         <div className="card" style={{ marginTop: 0 }}>
           <div className="card__top">
             <div className="card__title">Importera tröjor</div>
