@@ -26,6 +26,44 @@ async function apiSaveWarehouse(items) {
   });
   if (!r.ok) throw new Error("Kunde inte spara lager");
 }
+
+/* ================= Sports gear (centrallager) ================= */
+
+async function apiLoadSportsGear() {
+  const r = await fetch("/api/sports-gear");
+  if (!r.ok) throw new Error("Kunde inte läsa idrottsmaterial");
+  const data = await r.json();
+  return Array.isArray(data) ? data : [];
+}
+
+async function apiSaveSportsGear(items) {
+  const r = await fetch("/api/sports-gear", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ items }),
+  });
+  if (!r.ok) throw new Error("Kunde inte spara idrottsmaterial");
+}
+
+/* ================= Team gear (utlämnat material per lag) ================= */
+
+async function apiLoadTeamGear(teamId) {
+  const r = await fetch(`/api/team-gear?teamId=${encodeURIComponent(teamId)}`);
+  if (!r.ok) throw new Error("Kunde inte läsa lagets idrottsmaterial");
+  const data = await r.json();
+  return Array.isArray(data) ? data : [];
+}
+
+async function apiSaveTeamGear(teamId, items) {
+  const r = await fetch("/api/team-gear", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ teamId, items }),
+  });
+  if (!r.ok) throw new Error("Kunde inte spara lagets idrottsmaterial");
+}
+
+
 // ===== API: ISSUED =====
 async function apiLoadIssued(teamId) {
   const r = await fetch(`/api/issued?teamId=${encodeURIComponent(teamId)}`);
@@ -397,29 +435,6 @@ function useRoute() {
   return { route, nav };
 }
 
-/* ================= Notifications ================= */
-async function apiGetNotifs(userId) {
-  const r = await fetch(`/api/notifications-get?userId=${encodeURIComponent(userId)}`);
-  if (!r.ok) throw new Error("Kunde inte hämta notiser");
-  return await r.json();
-}
-
-async function apiAddNotif(userId, message) {
-  await fetch("/api/notifications-add", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ userId, message }),
-  });
-}
-
-async function apiMarkNotifRead(userId, notifId) {
-  await fetch("/api/notifications-read", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ userId, notifId }),
-  });
-}
-
 /* ================= Auth ================= */
 function useAuth() {
   const [user, setUser] = useState(() => jget("auth:user", null));
@@ -431,7 +446,6 @@ function useAuth() {
     if (u.pinHash !== hashPin(pin)) return { ok: false, msg: "Fel PIN" };
     jset("auth:user", u);
     setUser(u);
-    apiAddNotif(u.id, "Inloggad ✅");
     return { ok: true };
   };
 
@@ -575,7 +589,93 @@ async function moveMatchKit(fromTeamId, toTeamId, ids) {
     return nextWarehouse;
   }
 
-/* ================= Team extras (shorts/strumpor per lag) ================= */
+async function assignSportsGearToTeam(teamId, nextTeamGear) {
+  const [sportsGearStock, currentTeamGear] = await Promise.all([
+    apiLoadSportsGear(),
+    apiLoadTeamGear(teamId),
+  ]);
+
+  const safeStock = Array.isArray(sportsGearStock) ? sportsGearStock : [];
+  const safeCurrent = Array.isArray(currentTeamGear) ? currentTeamGear : [];
+  const safeNext = Array.isArray(nextTeamGear) ? nextTeamGear : [];
+
+  const deltas = {};
+
+  const makeKey = (kind, size) => `${kind}|${size || ""}`;
+
+  const addDelta = (kind, size, delta) => {
+    const key = makeKey(kind, size);
+    deltas[key] = (deltas[key] || 0) + delta;
+  };
+
+  // Lägg tillbaka allt laget hade
+  safeCurrent.forEach((x) => {
+    addDelta(x.kind, x.size, +Number(x.qty || 0));
+  });
+
+  // Dra det laget ska ha nu
+  safeNext.forEach((x) => {
+    addDelta(x.kind, x.size, -Number(x.qty || 0));
+  });
+
+  // Kontrollera att lager räcker
+  for (const key of Object.keys(deltas)) {
+    const [kind, size] = key.split("|");
+    const delta = deltas[key];
+
+    const currentStockItem = safeStock.find(
+      (x) => x.kind === kind && (x.size || "") === (size || "")
+    );
+
+    const currentQty = currentStockItem ? Number(currentStockItem.qty || 0) : 0;
+    const nextQty = currentQty + delta;
+
+    if (nextQty < 0) {
+      throw new Error(
+        `För lite i lager för ${kind}${size ? ` (${size})` : ""}. Har ${currentQty}, behöver ${Math.abs(delta)}.`
+      );
+    }
+  }
+
+  // Bygg nytt sports-gear-lager
+  const nextStock = safeStock.map((item) => {
+    const key = makeKey(item.kind, item.size);
+    const delta = deltas[key] || 0;
+
+    return {
+      ...item,
+      qty: Math.max(0, Number(item.qty || 0) + delta),
+    };
+  });
+
+  // Om laget tilldelas något som inte fanns i stocklistan men med 0 qty före, se till att raden finns
+  for (const key of Object.keys(deltas)) {
+    const [kind, size] = key.split("|");
+    const exists = nextStock.some(
+      (x) => x.kind === kind && (x.size || "") === (size || "")
+    );
+
+    if (!exists) {
+      const qty = deltas[key];
+      // qty här borde aldrig vara > 0 i praktiken om vi bara drar från lager,
+      // men vi håller modellen säker
+      nextStock.push({
+        id: `${kind}:${size || "nosize"}`,
+        kind,
+        size,
+        qty: Math.max(0, qty),
+      });
+    }
+  }
+
+  await apiSaveSportsGear(nextStock);
+  await apiSaveTeamGear(teamId, safeNext);
+
+  return {
+    stock: nextStock,
+    teamGear: safeNext,
+  };
+}
 
 /* ================= Team extras (shorts/strumpor per lag, flera storlekar) ================= */
 
@@ -915,7 +1015,7 @@ function Login({ users, onLogin }) {
 }
 
 /* ================= Topbar ================= */
-function Topbar({ user, teamsVisible, activeTeamId, setActiveTeamId, nav, unreadCount }) {
+function Topbar({ user, teamsVisible, activeTeamId, setActiveTeamId, nav }) {
   return (
     <header className="topbar">
       <div className="topbar__row">
@@ -946,9 +1046,6 @@ function Topbar({ user, teamsVisible, activeTeamId, setActiveTeamId, nav, unread
     </select>
   </div>
 
-  <button className="btn btn--ghost btn--notifications" onClick={() => nav("/notifications")}>
-    Notiser {unreadCount > 0 ? `(${unreadCount})` : ""}
-  </button>
  </div>
       </div>
     </header>
@@ -962,7 +1059,9 @@ function BottomNav({ route, nav, user }) {
 {user.role === "admin" && (
   <NavButton active={route === "/warehouse"} label="Huvudlager" onClick={() => nav("/warehouse")} />
 )}
-      
+{user.role === "admin" && (
+  <NavButton active={route === "/sportsgear"} label="Idrottsmaterial" onClick={() => nav("/sportsgear")} />
+)}
 <NavButton active={route === "/matchkit"} label="Matchkläder" onClick={() => nav("/matchkit")} />
       <NavButton active={route === "/leaderclothes"} label="Ledarkläder" onClick={() => nav("/leaderclothes")} />
       <NavButton active={route === "/teamcash"} label="Lagkassa" onClick={() => nav("/teamcash")} />
@@ -972,59 +1071,6 @@ function BottomNav({ route, nav, user }) {
   );
 }
 
-/* ================= Page: Notifications ================= */
-function NotificationsPage({ user }) {
-  const [list, setList] = useState([]);
-  const [loading, setLoading] = useState(true);
-
-  useEffect(() => {
-    let alive = true;
-    setLoading(true);
-    apiGetNotifs(user.id)
-      .then((l) => alive && setList(l))
-      .finally(() => alive && setLoading(false));
-    return () => { alive = false; };
-  }, [user.id]);
-
-  const unread = list.filter((n) => !n.read).length;
-
-  return (
-    <div>
-      <div className="card">
-        <div className="card__top">
-          <div className="card__title">Notiser</div>
-          <Pill tone="neutral">{unread} olästa</Pill>
-        </div>
-        {loading && <div className="empty">Laddar…</div>}
-        {!loading && list.length === 0 && <div className="empty">Inga notiser</div>}
-      </div>
-
-      <div className="history">
-        {list.map((n) => (
-          <div key={n.id} className={`historyRow ${n.read ? "" : "card--selected"}`}>
-            <div>
-              <div className="historyRow__title">{n.message}</div>
-              <div className="historyRow__sub">
-                {new Date(n.createdAt).toLocaleString()}
-              </div>
-            </div>
-            {!n.read && (
-              <button
-                className="btn btn--ok"
-                onClick={async () => {
-                  await apiMarkNotifRead(user.id, n.id);
-                  setList(await apiGetNotifs(user.id));
-                }}
-              >
-                Läst
-              </button>
-            )}
-          </div>
-        ))}
-      </div>
-    </div>
-  );
-}
 /* ================= HUVUDLAGER: Matchkläder (Warehouse) ================= */
 
 function WarehouseMatchkitPage({ user }) {
@@ -2069,11 +2115,552 @@ const isKeeper = confirm("Är detta en målvaktströja?");
 
 
 
+/* ================= Page: Sports Gear ================= */
+function SportsGearPage({ user }) {
+  const isAdmin = user.role === "admin";
+
+  const [items, setItems] = useState([]);
+
+  // formulär för ny rad
+  const [kind, setKind] = useState("");
+  const [size, setSize] = useState("");
+  const [qty, setQty] = useState("");
+  const [lowStockAt, setLowStockAt] = useState("");
+
+  // inline edit
+  const [editingId, setEditingId] = useState(null);
+  const [editKind, setEditKind] = useState("");
+  const [editSize, setEditSize] = useState("");
+  const [editQty, setEditQty] = useState("");
+  const [editLowStockAt, setEditLowStockAt] = useState("");
+
+  useEffect(() => {
+    let alive = true;
+
+    (async () => {
+      try {
+        const data = await apiLoadSportsGear();
+        if (!alive) return;
+        setItems(normalizeSportsGearList(data));
+      } catch (e) {
+        console.error(e);
+        if (!alive) return;
+        setItems([]);
+      }
+    })();
+
+    return () => {
+      alive = false;
+    };
+  }, []);
+
+  const gearLabels = {
+    balls: "Bollar",
+    vests: "Västar",
+    cones: "Koner",
+    medical: "Sjukvårdsmaterial",
+    gloves: "Målvaktshandskar",
+    other: "Övrigt",
+  };
+
+  const gearIcons = {
+    balls: "🏀",
+    vests: "🦺",
+    cones: "🔺",
+    medical: "🩹",
+    gloves: "🧤",
+    other: "📦",
+  };
+
+  function normalizeSportsGearList(list) {
+    const map = {};
+
+    (Array.isArray(list) ? list : []).forEach((i) => {
+      const kind = String(i?.kind ?? "").trim().toLowerCase();
+      const size = String(i?.size ?? "").trim();
+      const qtyNum = Math.max(0, Number(i?.qty) || 0);
+      const thresholdNum = Math.max(0, Number(i?.lowStockAt) || 0);
+
+      if (!kind) return;
+
+      const key = `${kind}|${size || ""}`;
+
+      if (!map[key]) {
+        map[key] = {
+          id: i?.id ?? key,
+          kind,
+          size,
+          qty: 0,
+          lowStockAt: thresholdNum,
+        };
+      }
+
+      map[key].qty += qtyNum;
+
+      // behåll senaste/tydligaste tröskelvärde om det finns dubletter
+      if (thresholdNum > 0) {
+        map[key].lowStockAt = thresholdNum;
+      }
+    });
+
+    return Object.values(map).sort((a, b) => {
+      const labelA = `${gearLabels[a.kind] || a.kind} ${a.size || ""}`;
+      const labelB = `${gearLabels[b.kind] || b.kind} ${b.size || ""}`;
+      return labelA.localeCompare(labelB, "sv");
+    });
+  }
+
+  const totalQty = useMemo(() => {
+    return items.reduce((sum, g) => sum + (Number(g.qty) || 0), 0);
+  }, [items]);
+
+  const isLowStock = (item) => {
+    const threshold = Number(item?.lowStockAt) || 0;
+    if (threshold <= 0) return false;
+    return Number(item?.qty) <= threshold;
+  };
+
+  const persistItems = async (next) => {
+    const normalized = normalizeSportsGearList(next);
+    setItems(normalized);
+    await apiSaveSportsGear(normalized);
+    return normalized;
+  };
+
+  const addItem = async () => {
+    const amount = Math.max(0, Number(qty) || 0);
+    const threshold = Math.max(0, Number(lowStockAt) || 0);
+
+    if (!kind || amount <= 0) {
+      alert("Välj typ och ange ett antal större än 0.");
+      return;
+    }
+
+    const next = [...items];
+
+    const existing = next.find(
+      (x) =>
+        x.kind === kind &&
+        (x.size || "") === (size || "")
+    );
+
+    if (existing) {
+      existing.qty += amount;
+      existing.lowStockAt = threshold;
+    } else {
+      next.push({
+        id: uuid(),
+        kind,
+        size: size || "",
+        qty: amount,
+        lowStockAt: threshold,
+      });
+    }
+
+    await persistItems(next);
+
+    setKind("");
+    setSize("");
+    setQty("");
+    setLowStockAt("");
+  };
+
+  const updateGroupedQty = async (kindToChange, sizeToChange, delta) => {
+    const next = [...items];
+
+    const target = next.find(
+      (x) =>
+        x.kind === kindToChange &&
+        (x.size || "") === (sizeToChange || "")
+    );
+
+    if (!target) return;
+
+    const nextQty = Math.max(0, (Number(target.qty) || 0) + delta);
+    target.qty = nextQty;
+
+    const cleaned = next.filter((x) => (Number(x.qty) || 0) > 0);
+
+    await persistItems(cleaned);
+  };
+
+  const removeGroupedRow = async (kindToRemove, sizeToRemove) => {
+    const next = items.filter(
+      (x) =>
+        !(
+          x.kind === kindToRemove &&
+          (x.size || "") === (sizeToRemove || "")
+        )
+    );
+
+    await persistItems(next);
+  };
+
+  const startEditRow = (row) => {
+    setEditingId(row.id);
+    setEditKind(row.kind);
+    setEditSize(row.size || "");
+    setEditQty(String(row.qty ?? ""));
+    setEditLowStockAt(String(row.lowStockAt ?? ""));
+  };
+
+  const cancelEditRow = () => {
+    setEditingId(null);
+    setEditKind("");
+    setEditSize("");
+    setEditQty("");
+    setEditLowStockAt("");
+  };
+
+  const saveEditRow = async (row) => {
+    const newQty = Math.max(0, Number(editQty) || 0);
+    const newThreshold = Math.max(0, Number(editLowStockAt) || 0);
+    const newKind = String(editKind || "").trim().toLowerCase();
+    const newSize = String(editSize || "").trim();
+
+    if (!newKind || newQty <= 0) {
+      alert("Typ och antal måste vara ifyllt.");
+      return;
+    }
+
+    // ta bort gamla raden
+    let next = items.filter((x) => x.id !== row.id);
+
+    // om ny kombination redan finns → merge
+    const existing = next.find(
+      (x) =>
+        x.kind === newKind &&
+        (x.size || "") === (newSize || "")
+    );
+
+    if (existing) {
+      existing.qty += newQty;
+      existing.lowStockAt = newThreshold;
+    } else {
+      next.push({
+        id: row.id,
+        kind: newKind,
+        size: newSize,
+        qty: newQty,
+        lowStockAt: newThreshold,
+      });
+    }
+
+    await persistItems(next);
+    cancelEditRow();
+  };
+
+  return (
+    <div>
+      {/* Översikt */}
+      <div className="summaryCard">
+        <div className="summaryTitle">Idrottsmaterial</div>
+        <div className="summaryValue">{items.length}</div>
+        <div className="summarySub">
+          Materialrader i lager · totalt {totalQty} st
+        </div>
+      </div>
+
+      {/* Lägg till material */}
+      {isAdmin && (
+        <div className="card" style={{ marginTop: 12 }}>
+          <div className="card__top">
+            <div className="card__title">Lägg till idrottsmaterial</div>
+          </div>
+
+          <div className="formGrid" style={{ marginTop: 10 }}>
+            <div className="field">
+              <span>Typ</span>
+              <select value={kind} onChange={(e) => setKind(e.target.value)}>
+                <option value="">Välj typ</option>
+                {Object.keys(gearLabels).map((k) => (
+                  <option key={k} value={k}>
+                    {gearLabels[k]}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div className="field">
+              <span>Storlek</span>
+              <input
+                value={size}
+                onChange={(e) => setSize(e.target.value)}
+                placeholder="t.ex. 4"
+              />
+            </div>
+
+            <div className="field">
+              <span>Antal</span>
+              <input
+                value={qty}
+                onChange={(e) => setQty(e.target.value)}
+                inputMode="numeric"
+                placeholder="0"
+              />
+            </div>
+
+            <div className="field">
+              <span>Varningsnivå</span>
+              <input
+                value={lowStockAt}
+                onChange={(e) => setLowStockAt(e.target.value)}
+                inputMode="numeric"
+                placeholder="t.ex. 5"
+              />
+            </div>
+          </div>
+
+          <div className="btnRow" style={{ marginTop: 10 }}>
+            <button className="btn btn--ok" onClick={addItem}>
+              Lägg till
+            </button>
+
+            <button
+              className="btn btn--ghost"
+              onClick={() => {
+                setKind("");
+                setSize("");
+                setQty("");
+                setLowStockAt("");
+              }}
+            >
+              Rensa
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Lagerlista */}
+      <div className="card" style={{ marginTop: 12 }}>
+        <div className="card__top">
+          <div className="card__title">Lager</div>
+          <Pill tone="neutral">{items.length} rader</Pill>
+        </div>
+
+        <div className="history" style={{ marginTop: 10 }}>
+          {items.length === 0 && (
+            <div className="empty">Inget material i lager ännu</div>
+          )}
+
+          {items.map((g) => {
+            const low = isLowStock(g);
+
+            if (editingId === g.id) {
+              return (
+                <div
+                  key={g.id}
+                  className="historyRow"
+                  style={{
+                    display: "grid",
+                    gridTemplateColumns: "1fr auto",
+                    gap: 10,
+                    alignItems: "center",
+                    padding: "8px 12px",
+                    borderRadius: 12,
+                    marginBottom: 6,
+                    background: "rgba(30,91,191,.08)",
+                    border: "1px solid rgba(30,91,191,.18)",
+                  }}
+                >
+                  <div className="formGrid" style={{ marginTop: 0 }}>
+                    <div className="field">
+                      <span>Typ</span>
+                      <select
+                        value={editKind}
+                        onChange={(e) => setEditKind(e.target.value)}
+                      >
+                        {Object.keys(gearLabels).map((k) => (
+                          <option key={k} value={k}>
+                            {gearLabels[k]}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+
+                    <div className="field">
+                      <span>Storlek</span>
+                      <input
+                        value={editSize}
+                        onChange={(e) => setEditSize(e.target.value)}
+                        placeholder="t.ex. 4"
+                      />
+                    </div>
+
+                    <div className="field">
+                      <span>Antal</span>
+                      <input
+                        value={editQty}
+                        onChange={(e) => setEditQty(e.target.value)}
+                        inputMode="numeric"
+                      />
+                    </div>
+
+                    <div className="field">
+                      <span>Varningsnivå</span>
+                      <input
+                        value={editLowStockAt}
+                        onChange={(e) => setEditLowStockAt(e.target.value)}
+                        inputMode="numeric"
+                      />
+                    </div>
+                  </div>
+
+                  <div
+                    style={{
+                      display: "flex",
+                      gap: 8,
+                      alignItems: "center",
+                      justifyContent: "flex-end",
+                    }}
+                  >
+                    <button className="iconBtn ok" onClick={() => saveEditRow(g)}>
+                      ✅
+                    </button>
+
+                    <button className="iconBtn" onClick={cancelEditRow}>
+                      ✖️
+                    </button>
+                  </div>
+                </div>
+              );
+            }
+
+            return (
+              <div
+                key={g.id}
+                className="historyRow"
+                style={{
+                  display: "grid",
+                  gridTemplateColumns: "1fr auto",
+                  gap: 10,
+                  alignItems: "center",
+                  padding: "8px 12px",
+                  borderRadius: 12,
+                  marginBottom: 6,
+                  background: low
+                    ? "rgba(239,68,68,.08)"
+                    : "rgba(255,255,255,.03)",
+                  border: low
+                    ? "1px solid rgba(239,68,68,.28)"
+                    : "1px solid rgba(157,179,216,.12)",
+                }}
+              >
+                {/* Vänster */}
+                <div style={{ minWidth: 0 }}>
+                  <div
+                    style={{
+                      fontSize: 14,
+                      fontWeight: 700,
+                      display: "flex",
+                      gap: 8,
+                      alignItems: "center",
+                      flexWrap: "wrap",
+                    }}
+                  >
+                    <span>{gearIcons[g.kind] || "📦"}</span>
+
+                    <span>
+                      {gearLabels[g.kind] || g.kind}
+                      {g.size ? ` – storlek ${g.size}` : ""}
+                    </span>
+                  </div>
+
+                  <div
+                    className="muted"
+                    style={{
+                      fontSize: 12,
+                      marginTop: 2,
+                      display: "flex",
+                      gap: 8,
+                      flexWrap: "wrap",
+                    }}
+                  >
+                    <span>Varningsnivå: {g.lowStockAt || 0}</span>
+
+                    {low && (
+                      <span style={{ color: "#ef4444", fontWeight: 700 }}>
+                        ⚠️ Lågt lager
+                      </span>
+                    )}
+                  </div>
+                </div>
+
+                {/* Höger */}
+                <div
+                  style={{
+                    display: "flex",
+                    gap: 8,
+                    alignItems: "center",
+                    justifyContent: "flex-end",
+                    whiteSpace: "nowrap",
+                  }}
+                >
+                  <strong style={{ minWidth: 50, textAlign: "right" }}>
+                    {g.qty} st
+                  </strong>
+
+                  {isAdmin && (
+                    <>
+                      <button
+                        className="iconBtn"
+                        title="Minska"
+                        onClick={() => updateGroupedQty(g.kind, g.size, -1)}
+                      >
+                        ➖
+                      </button>
+
+                      <button
+                        className="iconBtn"
+                        title="Öka"
+                        onClick={() => updateGroupedQty(g.kind, g.size, +1)}
+                      >
+                        ➕
+                      </button>
+
+                      <button
+                        className="iconBtn"
+                        title="Redigera rad"
+                        onClick={() => startEditRow(g)}
+                      >
+                        ✏️
+                      </button>
+
+                      <button
+                        className="iconBtn danger"
+                        title="Ta bort rad"
+                        onClick={() => removeGroupedRow(g.kind, g.size)}
+                      >
+                        🗑️
+                      </button>
+                    </>
+                  )}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+
 /* ================= Page: Matchkit ================= */
 function MatchKitPage({ user, teamId, teamsVisible }) {
   const isAdmin = user.role === "admin";
 
+const [sportsGearStock, setSportsGearStock] = useState([]);
+const [assignGearOpen, setAssignGearOpen] = useState(false);
+const [selectedGearKind, setSelectedGearKind] = useState("");
+const [selectedGearSize, setSelectedGearSize] = useState("");
+const [assignQty, setAssignQty] = useState("");
+
   const [showOnlyGoalkeepers, setShowOnlyGoalkeepers] = useState(false);
+const [sportsGear, setSportsGear] = useState([]);
+const [showGear, setShowGear] = useState(false);
+
+
 
   // Matchtröjor för valt lag
   const [items, setItems] = useState([]);
@@ -2095,6 +2682,158 @@ const startEditTeamExtras = () => {
 const cancelEditTeamExtras = () => {
   setDraftTeamExtras(normalizeTeamExtras(teamExtras));
   setEditingTeamExtras(false);
+};
+
+const capitalize = (s) =>
+  s ? s.charAt(0).toUpperCase() + s.slice(1) : "";
+
+const groupedGear = useMemo(() => {
+  const map = {};
+
+  (sportsGear || []).forEach((g) => {
+    const key = `${g.kind}|${g.size || ""}`;
+
+    if (!map[key]) {
+      map[key] = {
+        kind: g.kind,
+        size: g.size,
+        qty: 0,
+      };
+    }
+
+    map[key].qty += Number(g.qty) || 0;
+  });
+
+  return Object.values(map);
+}, [sportsGear]);
+
+const gearIcons = {
+  balls: "🏀",
+  vests: "🦺",
+  cones: "🔺",
+  medical: "🩹",
+  gloves: "🧤",
+};
+
+const gearLabels = {
+  balls: "Bollar",
+  vests: "Västar",
+  cones: "Koner",
+  medical: "Sjukvårdsmaterial",
+  gloves: "Målvaktshandskar",
+};
+
+const gearKinds = useMemo(() => {
+  return [...new Set((sportsGearStock || []).map((g) => g.kind))].sort((a, b) =>
+    a.localeCompare(b, "sv")
+  );
+}, [sportsGearStock]);
+
+const gearSizesForSelectedKind = useMemo(() => {
+  return (sportsGearStock || [])
+    .filter((g) => g.kind === selectedGearKind)
+    .map((g) => g.size || "")
+    .filter((v, i, arr) => arr.indexOf(v) === i)
+    .sort((a, b) => a.localeCompare(b, "sv"));
+}, [sportsGearStock, selectedGearKind]);
+
+const saveAssignedGear = async () => {
+  const qty = Math.max(0, Number(assignQty) || 0);
+  if (!selectedGearKind || qty <= 0) {
+    alert("Välj material och ange ett antal.");
+    return;
+  }
+
+  const next = [...sportsGear];
+  const existing = next.find(
+    (x) =>
+      x.kind === selectedGearKind &&
+      (x.size || "") === (selectedGearSize || "")
+  );
+
+  if (existing) {
+    existing.qty += qty;
+  } else {
+    next.push({
+      kind: selectedGearKind,
+      size: selectedGearSize || "",
+      qty,
+    });
+  }
+
+
+  
+  try {
+    const res = await assignSportsGearToTeam(teamId, next);
+
+    setSportsGear(res.teamGear);
+    setSportsGearStock(res.stock);
+
+    setAssignGearOpen(false);
+    setSelectedGearKind("");
+    setSelectedGearSize("");
+    setAssignQty("");
+  } catch (err) {
+    console.error(err);
+    alert(err.message || "Kunde inte tilldela material.");
+  }
+};
+
+const returnGearToStock = async (kind, size) => {
+  try {
+    const currentTeamGear = [...sportsGear];
+
+    const item = currentTeamGear.find(
+      (x) =>
+        x.kind === kind &&
+        (x.size || "") === (size || "")
+    );
+
+    if (!item) return;
+
+    if (!confirm("Returnera material till huvudlager?")) return;
+
+    const qtyToReturn = Number(item.qty) || 0;
+
+    // ✅ 1. Ta bort från lag
+    const nextTeamGear = currentTeamGear.filter(
+      (x) =>
+        !(
+          x.kind === kind &&
+          (x.size || "") === (size || "")
+        )
+    );
+
+    // ✅ 2. Lägg tillbaka i sports-gear lager
+    const stock = [...sportsGearStock];
+
+    const existingStock = stock.find(
+      (s) =>
+        s.kind === kind &&
+        (s.size || "") === (size || "")
+    );
+
+    if (existingStock) {
+      existingStock.qty += qtyToReturn;
+    } else {
+      stock.push({
+        id: `${kind}-${size || "nosize"}`,
+        kind,
+        size: size || "",
+        qty: qtyToReturn,
+      });
+    }
+
+    await apiSaveTeamGear(teamId, nextTeamGear);
+    await apiSaveSportsGear(stock);
+
+    setSportsGear(nextTeamGear);
+    setSportsGearStock(stock);
+
+  } catch (err) {
+    console.error(err);
+    alert("Kunde inte returnera material");
+  }
 };
 
 const addDraftRow = (kind) => {
@@ -2160,46 +2899,81 @@ const [assignOnlyGoalkeepers, setAssignOnlyGoalkeepers] = useState(false);
 
   // Ladda data
   useEffect(() => {
-    let alive = true;
+  let alive = true;
 
-    (async () => {
+  (async () => {
+    try {
+
+      // ✅ 1. Ladda huvuddata
+      const [matchkitData, warehouseData, extrasData] = await Promise.all([
+        apiLoadMatchKit(teamId),
+        apiLoadWarehouse(),
+        apiLoadTeamExtras(teamId),
+      ]);
+
+      // ✅ 2. Ladda gear separat
+      let gearData = [];
+      let sportsGearStockData = [];
+
       try {
-        const [matchkitData, warehouseData, extrasData] = await Promise.all([
-          apiLoadMatchKit(teamId),
-          apiLoadWarehouse(),
-          apiLoadTeamExtras(teamId),
-        ]);
-
-        if (!alive) return;
-
-        setItems(normalizeMatchkit(matchkitData));
-        setWarehouseItems(normalizeWarehouse(warehouseData));
-
-        const normalizedExtras = normalizeTeamExtras(extrasData);
-
-        setTeamExtras(normalizedExtras);
-        setDraftTeamExtras(normalizedExtras);
-
-          setSelected([]);
-          setMoveFrom(teamId);
-          setMoveTo(teamsVisible.find((t) => t.id !== teamId)?.id ?? teamId);
-
-          setEditingTeamExtras(false);
-
+        gearData = await apiLoadTeamGear(teamId);
       } catch (e) {
-        console.error(e);
-        if (!alive) return;
-        setItems([]);
-        setWarehouseItems([]);
-        setTeamExtras({ shorts: [], socks: [] });
-        setSelected([]);
+        console.warn("kunde inte ladda team gear", e);
       }
-    })();
 
-    return () => {
-      alive = false;
-    };
-  }, [teamId, teamsVisible]);
+      try {
+        sportsGearStockData = await apiLoadSportsGear();
+      } catch (e) {
+        console.warn("kunde inte ladda sports gear", e);
+      }
+
+      if (!alive) return;
+
+      // ✅ 3. SET STATE (ALLT SAMLAT HÄR)
+      setItems(normalizeMatchkit(matchkitData));
+      setWarehouseItems(normalizeWarehouse(warehouseData));
+
+      const normalizedExtras = normalizeTeamExtras(extrasData);
+      setTeamExtras(normalizedExtras);
+      setDraftTeamExtras(normalizedExtras);
+
+      setSportsGear(Array.isArray(gearData) ? gearData : []);
+      setSportsGearStock(
+        Array.isArray(sportsGearStockData)
+          ? sportsGearStockData
+          : []
+      );
+
+      setSelected([]);
+      setMoveFrom(teamId);
+      setMoveTo(
+        teamsVisible.find((t) => t.id !== teamId)?.id ?? teamId
+      );
+      setEditingTeamExtras(false);
+
+    } catch (e) {
+      console.error(e);
+      if (!alive) return;
+
+      setItems([]);
+      setWarehouseItems([]);
+      setTeamExtras({ shorts: [], socks: [] });
+
+      // ✅ även reset för gear
+      setSportsGear([]);
+      setSportsGearStock([]);
+
+      setSelected([]);
+    }
+  })();
+
+  return () => {
+    alive = false;
+  };
+}, [teamId, teamsVisible]);
+
+
+
 
   const stock = useMemo(() => splitWarehouse(warehouseItems).stock, [warehouseItems]);
 const assignSizes = useMemo(() => {
@@ -2301,6 +3075,7 @@ const updateItem = async (id, patch) => {
     return incoming.length;
   };
 
+
   /**
    * Uppdatera lagets shorts/strumpor med automatisk lagerjustering
    * old -> läggs tillbaka
@@ -2399,8 +3174,187 @@ const returnToWarehouse = async (itemId) => {
           {assignedCount}/{items.length}
         </div>
         <div className="summarySub">Tilldelade / Totalt</div>
+        
+  <button
+    className="iconBtn"
+    title="Lägg till från huvudlager"
+    onClick={() => setAssignFromWarehouseOpen(true)}
+  >
+    ➕
+  </button>
+
+        
+<button
+  className="btn btn--ghost"
+  style={{ marginTop: 6 }}
+  onClick={() => setShowGear((prev) => !prev)}
+>
+  Idrottsmaterial ▾
+</button>
+
+{isAdmin && (
+  <button
+    className="btn btn--ghost"
+    style={{ marginTop: 6, marginLeft: 8 }}
+    onClick={() => setAssignGearOpen((prev) => !prev)}
+  >
+    Tilldela material
+  </button>
+)}
+
+
+
       </div>
       
+{showGear && (
+  <div className="card" style={{ marginTop: 10 }}>
+    {groupedGear.length === 0 && (
+      <div className="empty">Inget material tilldelat</div>
+    )}
+
+    {groupedGear.map((g, idx) => (
+  <div
+    key={`${g.kind}-${g.size || "nosize"}`}
+    className="historyRow"
+    style={{
+      display: "grid",
+      gridTemplateColumns: "1fr auto auto",
+      gap: 10,
+      alignItems: "center",
+      padding: "8px 12px",
+      borderRadius: 12,
+      marginBottom: 6,
+      background: "rgba(255,255,255,.03)",
+      border: "1px solid rgba(157,179,216,.12)",
+    }}
+  >
+    {/* ✅ INFO */}
+    <div>
+      <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+        <span>{gearIcons[g.kind] || "📦"}</span>
+
+        <strong>
+          {gearLabels[g.kind] || g.kind}
+        </strong>
+
+        {g.size && (
+          <span style={{ fontSize: 12, opacity: 0.8 }}>
+            – storlek {g.size}
+          </span>
+        )}
+      </div>
+    </div>
+
+    {/* ✅ ANTAL */}
+    <strong>{g.qty} st</strong>
+
+    {/* ✅ ACTION */}
+    {isAdmin && (
+      <button
+        className="iconBtn"
+        title="Returnera till lager"
+        onClick={() => returnGearToStock(g.kind, g.size)}
+      >
+        ↩️
+      </button>
+    )}
+  </div>
+))}
+  </div>
+)}
+
+{assignGearOpen && (
+  <div className="card" style={{ marginTop: 10 }}>
+    <div className="card__top">
+      <div className="card__title">Tilldela material till laget</div>
+
+      <button
+        className="btn btn--ghost"
+        onClick={() => setAssignGearOpen(false)}
+      >
+        Stäng
+      </button>
+    </div>
+
+    <div className="formGrid" style={{ marginTop: 10 }}>
+      <div className="field">
+        <span>Typ</span>
+        <select
+          value={selectedGearKind}
+          onChange={(e) => {
+            setSelectedGearKind(e.target.value);
+            setSelectedGearSize("");
+          }}
+        >
+          <option value="">Välj typ</option>
+          {gearKinds.map((k) => (
+            <option key={k} value={k}>
+              {gearLabels[k] || k}
+            </option>
+          ))}
+        </select>
+      </div>
+
+      <div className="field">
+        <span>Storlek</span>
+        <select
+          value={selectedGearSize}
+          onChange={(e) => setSelectedGearSize(e.target.value)}
+        >
+          <option value="">Ingen / valfri</option>
+          {gearSizesForSelectedKind.map((s) => (
+            <option key={s || "nosize"} value={s}>
+              {s || "Ingen storlek"}
+            </option>
+          ))}
+        </select>
+      </div>
+
+      <div className="field">
+        <span>Antal</span>
+        <input
+          value={assignQty}
+          onChange={(e) => setAssignQty(e.target.value)}
+          inputMode="numeric"
+          placeholder="t.ex. 10"
+        />
+      </div>
+    </div>
+
+    <div className="history" style={{ marginTop: 12 }}>
+      {(sportsGearStock || [])
+        .filter((g) => !selectedGearKind || g.kind === selectedGearKind)
+        .filter((g) => !selectedGearSize || (g.size || "") === selectedGearSize)
+        .map((g) => (
+          <div key={g.id} className="historyRow">
+            <div>
+              {gearLabels[g.kind] || g.kind} {g.size && `(${g.size})`}
+            </div>
+            <strong>{g.qty} st i lager</strong>
+          </div>
+        ))}
+    </div>
+
+    <div className="btnRow" style={{ marginTop: 10 }}>
+      <button className="btn btn--ok" onClick={saveAssignedGear}>
+        Spara
+      </button>
+
+      <button
+        className="btn btn--ghost"
+        onClick={() => {
+          setAssignGearOpen(false);
+          setSelectedGearKind("");
+          setSelectedGearSize("");
+          setAssignQty("");
+        }}
+      >
+        Avbryt
+      </button>
+    </div>
+  </div>
+)}
+
 {assignFromWarehouseOpen && (
   <div className="card" style={{ marginTop: 12 }}>
 
@@ -2546,15 +3500,6 @@ const returnToWarehouse = async (itemId) => {
   </div>
 )}
 
-<div style={{ marginTop: 8 }}>
-  <button
-    className="iconBtn"
-    title="Lägg till från huvudlager"
-    onClick={() => setAssignFromWarehouseOpen(true)}
-  >
-    ➕
-  </button>
-</div>
 
       {/* Lag-nivå shorts/strumpor */}
       <div className="card" style={{ marginTop: 12 }}>
@@ -2973,13 +3918,18 @@ const returnToWarehouse = async (itemId) => {
   );
 }
 
-/* ================= Page: Leaderclothes v2================= */
+/* ================= Page: Leaderclothes v2 ================= */
 function LeaderClothesV2Page({ user, teamId }) {
+  const isAdmin = user.role === "admin";
+
   const [entries, setEntries] = useState([]);
   const [leaderName, setLeaderName] = useState("");
   const [year, setYear] = useState(new Date().getFullYear());
   const [selectedItems, setSelectedItems] = useState([]);
   const [searchLeader, setSearchLeader] = useState("");
+
+  // ✅ styr formulär
+  const [showForm, setShowForm] = useState(false);
 
   useEffect(() => {
     load();
@@ -3024,7 +3974,8 @@ function LeaderClothesV2Page({ user, teamId }) {
       groups[key].years.add(e.year);
 
       for (const item of e.items || []) {
-        groups[key].itemTotals[item] = (groups[key].itemTotals[item] || 0) + 1;
+        groups[key].itemTotals[item] =
+          (groups[key].itemTotals[item] || 0) + 1;
       }
     }
 
@@ -3042,9 +3993,6 @@ function LeaderClothesV2Page({ user, teamId }) {
       .sort((a, b) => a.leaderName.localeCompare(b.leaderName, "sv"));
   }, [entries, searchLeader]);
 
-  const totalLeaders = groupedEntries.length;
-  const totalEntries = entries.length;
-
   const toggleItem = (item) => {
     setSelectedItems((prev) =>
       prev.includes(item)
@@ -3060,23 +4008,14 @@ function LeaderClothesV2Page({ user, teamId }) {
   };
 
   const saveEntry = async () => {
+    if (!isAdmin) return; // ✅ skydd
+
     const cleanName = String(leaderName || "").trim();
     const cleanYear = Number(year);
 
-    if (!cleanName) {
-      alert("Fyll i ledarens namn.");
-      return;
-    }
-
-    if (!cleanYear || !Number.isFinite(cleanYear)) {
-      alert("Fyll i ett giltigt år.");
-      return;
-    }
-
-    if (selectedItems.length === 0) {
-      alert("Välj minst ett plagg.");
-      return;
-    }
+    if (!cleanName) return alert("Fyll i namn");
+    if (!cleanYear) return alert("Fyll i år");
+    if (selectedItems.length === 0) return alert("Välj plagg");
 
     const existing = await apiLoadIssued(teamId);
     const safeExisting = normalizeLeaderClothesEntries(existing, teamId);
@@ -3091,37 +4030,17 @@ function LeaderClothesV2Page({ user, teamId }) {
       source: "manual",
     };
 
-    const next = [entry, ...safeExisting];
-    await apiSaveIssued(teamId, next);
+    await apiSaveIssued(teamId, [entry, ...safeExisting]);
 
     clearForm();
+    setShowForm(false); // ✅ stäng efter spara
     await load();
   };
 
-  const importExcel = async () => {
-    const input = document.createElement("input");
-    input.type = "file";
-    input.accept = ".xlsx,.xls";
-
-    input.onchange = async (e) => {
-      const file = e.target.files?.[0];
-      if (!file) return;
-
-      try {
-        const n = await importLeaderClothesExcel(file);
-        alert(`${n} rader importerade ✅`);
-        await load();
-      } catch (err) {
-        console.error(err);
-        alert("Importen misslyckades ❌");
-      }
-    };
-
-    input.click();
-  };
-
   const deleteEntry = async (id) => {
-    if (!confirm("Ta bort denna utdelning?")) return;
+    if (!isAdmin) return;
+
+    if (!confirm("Ta bort?")) return;
 
     const next = entries.filter((x) => x.id !== id);
     await apiSaveIssued(teamId, next);
@@ -3130,250 +4049,230 @@ function LeaderClothesV2Page({ user, teamId }) {
 
   return (
     <div>
-      {/* ===== ÖVERSIKT ===== */}
+
+      {/* ✅ ÖVERSIKT */}
       <div className="summaryCard">
         <div className="summaryTitle">Ledarkläder – {teamId}</div>
-        <div className="summaryValue">{totalLeaders}</div>
+        <div className="summaryValue">{groupedEntries.length}</div>
         <div className="summarySub">
-          Ledare med registrerade plagg · {totalEntries} utdelningar totalt
+          Ledare med plagg · {entries.length} utdelningar
         </div>
+
+        {/* ✅ KNAPP – ADMIN ONLY */}
+        {isAdmin && (
+          <div style={{ marginTop: 8 }}>
+            <button
+              className="btn btn--primary"
+              onClick={() => setShowForm(true)}
+            >
+              Registrera ledarkläder
+            </button>
+          </div>
+        )}
+
+        {!isAdmin && (
+          <div className="muted" style={{ fontSize: 12, marginTop: 8 }}>
+            Endast admin kan registrera ledarkläder
+          </div>
+        )}
       </div>
 
-      {/* ===== FORM ===== */}
-      <div className="card" style={{ marginTop: 12 }}>
-        <div className="card__top">
-          <div className="card__title">Registrera ledarkläder</div>
-          <Pill tone="neutral">{selectedItems.length} valda</Pill>
-        </div>
+      {/* ✅ FORM – bara admin + knappstyrd */}
+      {isAdmin && showForm && (
+        <div className="card" style={{ marginTop: 12 }}>
+          <div className="card__top">
+            <div className="card__title">Registrera ledarkläder</div>
 
-        <div className="formGrid" style={{ marginTop: 10 }}>
-          <div className="field">
-            <span>Ledare</span>
+            <button
+              className="btn btn--ghost"
+              onClick={() => setShowForm(false)}
+            >
+              Stäng
+            </button>
+          </div>
+
+          <div className="formGrid" style={{ marginTop: 10 }}>
             <input
               value={leaderName}
               onChange={(e) => setLeaderName(e.target.value)}
-              placeholder="Skriv namn eller välj befintlig"
+              placeholder="Ledare"
               list="leaderSuggestions"
             />
+
             <datalist id="leaderSuggestions">
-              {existingLeaders.map((name) => (
-                <option key={name} value={name} />
+              {existingLeaders.map((n) => (
+                <option key={n} value={n} />
               ))}
             </datalist>
-          </div>
 
-          <div className="field">
-            <span>År</span>
             <input
               value={year}
               onChange={(e) => setYear(Number(e.target.value))}
-              inputMode="numeric"
-              placeholder="t.ex. 2026"
             />
           </div>
-        </div>
 
-        <div style={{ marginTop: 12 }}>
-          <div className="muted" style={{ fontSize: 12, marginBottom: 8 }}>
-            Kryssa för vilka kläder som beställts / hämtats ut
+          <div style={{ marginTop: 10 }}>
+            {LEADER_PRODUCTS.map((p) => (
+              <label key={p}>
+                <input
+                  type="checkbox"
+                  checked={selectedItems.includes(p)}
+                  onChange={() => toggleItem(p)}
+                />
+                {p}
+              </label>
+            ))}
           </div>
 
-          <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
-            {LEADER_PRODUCTS.map((product) => {
-              const checked = selectedItems.includes(product);
+          <div className="btnRow" style={{ marginTop: 10 }}>
+            <button className="btn btn--primary" onClick={saveEntry}>
+              Spara
+            </button>
 
-              return (
-                <label
-                  key={product}
-                  style={{
-                    display: "inline-flex",
-                    alignItems: "center",
-                    gap: 8,
-                    padding: "8px 12px",
-                    borderRadius: 999,
-                    border: checked
-                      ? "1px solid rgba(30,91,191,.35)"
-                      : "1px solid rgba(157,179,216,.16)",
-                    background: checked
-                      ? "rgba(30,91,191,.14)"
-                      : "rgba(255,255,255,.03)",
-                    cursor: "pointer",
-                    fontSize: 13,
-                    fontWeight: 600,
-                  }}
-                >
-                  <input
-                    type="checkbox"
-                    checked={checked}
-                    onChange={() => toggleItem(product)}
-                  />
-                  {product}
-                </label>
-              );
-            })}
+            <button className="btn btn--ghost" onClick={clearForm}>
+              Rensa
+            </button>
           </div>
         </div>
+      )}
 
-        <div className="btnRow" style={{ marginTop: 12 }}>
-          <button className="btn btn--primary" onClick={saveEntry}>
-            Spara
-          </button>
+      {/* ✅ LISTA */}
+<div className="history" style={{ marginTop: 12 }}>
+  {groupedEntries.length === 0 && (
+    <div className="empty">Inga registrerade ledarkläder ännu.</div>
+  )}
 
-          <button className="btn btn--ghost" onClick={clearForm}>
-            Rensa
-          </button>
+  {groupedEntries.map((group) => (
+    <div
+      key={group.leaderName}
+      className="card"
+      style={{
+        marginBottom: 12,
+        background: "rgba(255,255,255,0.02)",
+        border: "1px solid rgba(157,179,216,.12)",
+      }}
+    >
+      <div className="card__top">
+        <div>
+          <div className="card__title">{group.leaderName}</div>
 
-          <button className="btn btn--ghost" onClick={importExcel}>
-            📥 Importera Excel
-          </button>
-        </div>
-      </div>
-
-      {/* ===== FILTER / SÖK ===== */}
-      <div className="card" style={{ marginTop: 12 }}>
-        <div className="card__top">
-          <div className="card__title">Sök ledare</div>
-          <Pill tone="neutral">{groupedEntries.length} visade</Pill>
-        </div>
-
-        <div className="field" style={{ marginTop: 10 }}>
-          <span>Namn</span>
-          <input
-            value={searchLeader}
-            onChange={(e) => setSearchLeader(e.target.value)}
-            placeholder="Sök på ledarnamn"
-          />
-        </div>
-      </div>
-
-      {/* ===== GRUPPERAD HISTORIK ===== */}
-      <div className="history" style={{ marginTop: 12 }}>
-        {groupedEntries.length === 0 && (
-          <div className="empty">Inga registrerade ledarkläder ännu.</div>
-        )}
-
-        {groupedEntries.map((group) => (
           <div
-            key={group.leaderName}
-            className="card"
+            className="muted"
             style={{
-              marginBottom: 12,
-              background: "rgba(255,255,255,0.02)",
-              border: "1px solid rgba(157,179,216,.12)",
+              fontSize: 12,
+              marginTop: 4,
+              display: "flex",
+              gap: 8,
+              flexWrap: "wrap",
             }}
           >
-            <div className="card__top">
-              <div>
-                <div className="card__title">{group.leaderName}</div>
+            <span>Lag: {group.teamIds.join(", ")}</span>
+            <span>År: {group.years.join(", ")}</span>
+            <span>Poster: {group.rows.length}</span>
+          </div>
+        </div>
 
-                <div
-                  className="muted"
-                  style={{
-                    fontSize: 12,
-                    marginTop: 4,
-                    display: "flex",
-                    gap: 8,
-                    flexWrap: "wrap",
-                  }}
-                >
-                  <span>Lag: {group.teamIds.join(", ") || teamId}</span>
-                  <span>År: {group.years.join(", ")}</span>
-                  <span>Poster: {group.rows.length}</span>
-                </div>
+        <Pill tone="neutral">{group.rows.length} st</Pill>
+      </div>
+
+      {/* ✅ SNYGG SUMMERING AV PLAGG */}
+      <div
+        style={{
+          display: "flex",
+          gap: 8,
+          flexWrap: "wrap",
+          marginTop: 10,
+        }}
+      >
+        {Object.entries(group.itemTotals).map(([name, count]) => (
+          <span
+            key={`${group.leaderName}-${name}`}
+            style={{
+              display: "inline-flex",
+              alignItems: "center",
+              padding: "5px 10px",
+              borderRadius: 999,
+              background: "rgba(34,197,94,0.10)",
+              border: "1px solid rgba(34,197,94,0.20)",
+              fontSize: 12,
+              fontWeight: 700,
+            }}
+          >
+            {name}: {count}
+          </span>
+        ))}
+      </div>
+
+      {/* ✅ HISTORIK */}
+      <div className="history" style={{ marginTop: 12 }}>
+        {group.rows.map((e) => (
+          <div
+            key={e.id}
+            className="historyRow"
+            style={{
+              borderRadius: 12,
+              marginBottom: 8,
+              background: "rgba(255,255,255,0.02)",
+              border: "1px solid rgba(157,179,216,.10)",
+            }}
+          >
+            <div>
+              <div className="historyRow__title">
+                {e.year} · {e.teamId}
               </div>
 
-              <Pill tone="neutral">{group.rows.length} st</Pill>
+              {/* ✅ CHIP DESIGN FÖR PLAGG */}
+              <div
+                style={{
+                  display: "flex",
+                  gap: 8,
+                  flexWrap: "wrap",
+                  marginTop: 6,
+                }}
+              >
+                {(e.items || []).map((item, idx) => (
+                  <span
+                    key={`${e.id}-${idx}-${item}`}
+                    style={{
+                      display: "inline-flex",
+                      alignItems: "center",
+                      padding: "4px 10px",
+                      borderRadius: 999,
+                      background: "rgba(30,91,191,0.12)",
+                      border: "1px solid rgba(30,91,191,0.20)",
+                      fontSize: 12,
+                      fontWeight: 600,
+                    }}
+                  >
+                    {item}
+                  </span>
+                ))}
+              </div>
+
+              <div
+                className="muted"
+                style={{ fontSize: 12, marginTop: 6 }}
+              >
+                {e.createdAt
+                  ? new Date(e.createdAt).toLocaleDateString()
+                  : ""}
+              </div>
             </div>
 
-            {/* Summering av plagg */}
-            <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 10 }}>
-              {Object.entries(group.itemTotals).map(([name, count]) => (
-                <span
-                  key={`${group.leaderName}-${name}`}
-                  style={{
-                    display: "inline-flex",
-                    alignItems: "center",
-                    padding: "5px 10px",
-                    borderRadius: 999,
-                    background: "rgba(34,197,94,0.10)",
-                    border: "1px solid rgba(34,197,94,0.20)",
-                    fontSize: 12,
-                    fontWeight: 700,
-                  }}
-                >
-                  {name}: {count}
-                </span>
-              ))}
-            </div>
-
-            {/* Historikrader */}
-            <div className="history" style={{ marginTop: 12 }}>
-              {group.rows.map((e) => (
-                <div
-                  key={e.id}
-                  className="historyRow"
-                  style={{
-                    borderRadius: 12,
-                    marginBottom: 8,
-                    background: "rgba(255,255,255,0.02)",
-                    border: "1px solid rgba(157,179,216,.10)",
-                  }}
-                >
-                  <div>
-                    <div className="historyRow__title">
-                      {e.year} · {e.teamId}
-                    </div>
-
-                    <div
-                      className="historyRow__sub"
-                      style={{
-                        display: "flex",
-                        gap: 8,
-                        flexWrap: "wrap",
-                        marginTop: 6,
-                      }}
-                    >
-                      {(e.items || []).map((item, idx) => (
-                        <span
-                          key={`${e.id}-${idx}-${item}`}
-                          style={{
-                            display: "inline-flex",
-                            alignItems: "center",
-                            padding: "4px 10px",
-                            borderRadius: 999,
-                            background: "rgba(30,91,191,0.12)",
-                            border: "1px solid rgba(30,91,191,0.20)",
-                            fontSize: 12,
-                            fontWeight: 600,
-                          }}
-                        >
-                          {item}
-                        </span>
-                      ))}
-                    </div>
-
-                    <div className="historyRow__sub" style={{ marginTop: 6 }}>
-                      Källa: {e.source === "import" ? "Import" : "Manuell"} ·{" "}
-                      {e.createdAt
-                        ? new Date(e.createdAt).toLocaleDateString()
-                        : "-"}
-                    </div>
-                  </div>
-
-                  {user.role === "admin" && (
-                    <button
-                      className="btn btn--danger"
-                      onClick={() => deleteEntry(e.id)}
-                    >
-                      Ta bort
-                    </button>
-                  )}
-                </div>
-              ))}
-            </div>
+            {isAdmin && (
+              <button
+                className="btn btn--danger"
+                onClick={() => deleteEntry(e.id)}
+              >
+                Ta bort
+              </button>
+            )}
           </div>
         ))}
       </div>
+    </div>
+  ))}
+</div>
     </div>
   );
 }
@@ -3885,16 +4784,10 @@ const exportTeamExtras = async () => {
 function AuthedApp({ auth, route, nav }) {
   const { visibleTeams, activeTeamId, setActiveTeamId } = useTeams(auth.user);
 
-const [unreadCount, setUnreadCount] = useState(0);
-
-useEffect(() => {
-  apiGetNotifs(auth.user.id).then((list) => {
-    setUnreadCount(list.filter((n) => !n.read).length);
-  });
-}, [auth.user.id, route]);
-
   const renderPage = () => {
 if (route === "/warehouse") return <WarehouseMatchkitPage user={auth.user} />;    
+
+if (route === "/sportsgear") return <SportsGearPage user={auth.user} />;
 
 if (route === "/matchkit")
       return (
@@ -3926,7 +4819,7 @@ if (route === "/matchkit")
           teamsAll={DEFAULT_TEAMS}
         />
       );
-    if (route === "/notifications") return <NotificationsPage user={auth.user} />;
+
     return (
       <MatchKitPage
         user={auth.user}
@@ -3944,7 +4837,6 @@ if (route === "/matchkit")
         activeTeamId={activeTeamId}
         setActiveTeamId={setActiveTeamId}
         nav={nav}
-        unreadCount={unreadCount}
       />
 
       <main className="content">
