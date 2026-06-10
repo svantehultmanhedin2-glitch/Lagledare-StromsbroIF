@@ -2118,7 +2118,7 @@ const isKeeper = confirm("Är detta en målvaktströja?");
 /* ================= Page: Sports Gear ================= */
 function SportsGearPage({ user }) {
   const isAdmin = user.role === "admin";
-
+  const [showForm, setShowForm] = useState(false);
   const [items, setItems] = useState([]);
 
   // formulär för ny rad
@@ -2262,7 +2262,9 @@ function SportsGearPage({ user }) {
     setKind("");
     setSize("");
     setQty("");
-    setLowStockAt("");
+    setLowStockAt("");    
+    setShowForm(false);
+
   };
 
   const updateGroupedQty = async (kindToChange, sizeToChange, delta) => {
@@ -2354,19 +2356,50 @@ function SportsGearPage({ user }) {
     <div>
       {/* Översikt */}
       <div className="summaryCard">
-        <div className="summaryTitle">Idrottsmaterial</div>
-        <div className="summaryValue">{items.length}</div>
+  <div
+    style={{
+      display: "flex",
+      justifyContent: "space-between",
+      alignItems: "center",
+      gap: 10,
+      flexWrap: "wrap",
+    }}
+  >
+    <div className="summaryTitle">Idrottsmaterial</div>
+
+    {isAdmin && (
+      <button
+        className="btn btn--primary"
+        onClick={() => setShowForm(true)}
+        style={{ whiteSpace: "nowrap" }}
+      >
+        + Lägg till
+      </button>
+    )}
+  </div>
+   <div className="summaryValue">{items.length}</div>
         <div className="summarySub">
           Materialrader i lager · totalt {totalQty} st
         </div>
       </div>
+    
+
 
       {/* Lägg till material */}
-      {isAdmin && (
+     {isAdmin && showForm && (
         <div className="card" style={{ marginTop: 12 }}>
-          <div className="card__top">
-            <div className="card__title">Lägg till idrottsmaterial</div>
-          </div>
+          
+<div className="card__top">
+  <div className="card__title">Lägg till idrottsmaterial</div>
+
+  <button
+    className="btn btn--ghost"
+    onClick={() => setShowForm(false)}
+  >
+    Stäng
+  </button>
+</div>
+
 
           <div className="formGrid" style={{ marginTop: 10 }}>
             <div className="field">
