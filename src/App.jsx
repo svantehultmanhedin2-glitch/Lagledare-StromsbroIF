@@ -1121,28 +1121,6 @@ const [showToolsMobile, setShowToolsMobile] = useState(false);
     );
   }
 
-  useEffect(() => {
-  if (!isMobile) return;
-
-  let lastScrollY = window.scrollY;
-
-  const handleScroll = () => {
-    const currentY = window.scrollY;
-
-    // ✅ om man scrollar NER → stäng toolbars
-    if (currentY > lastScrollY && currentY > 100) {
-      setShowToolsMobile(false);
-    }
-
-    lastScrollY = currentY;
-  };
-
-  window.addEventListener("scroll", handleScroll);
-
-  return () => window.removeEventListener("scroll", handleScroll);
-}, [isMobile]);
-
-
   const { jerseys, stock } = splitWarehouse(items);
 
   const sizes = useMemo(() => {
@@ -1507,7 +1485,7 @@ const stickyWrapStyle = {
 
   return (
     <div>
-      {/* ===== STICKY STACK: sök + verktygsrad ===== */}
+     
 {/* ===== STICKY STACK: sök + verktygsrad ===== */}
 <div style={stickyWrapStyle}>
 
@@ -1571,70 +1549,99 @@ const stickyWrapStyle = {
       </div>
 
       {/* ===== TOOLBAR ===== */}
-      <div
-        className="card"
-        style={{
-          ...glassCardStyle,
-          padding: isMobile ? 8 : 12,
-          display: "flex",
-          gap: isMobile ? 6 : 8,
-          flexWrap: "wrap",
-          marginBottom: 12,
-        }}
-      >
-        <button
-          className={`btn ${showGoalkeepersOnly ? "btn--ok" : "btn--ghost"}`}
-          onClick={() => setShowGoalkeepersOnly((p) => !p)}
-        >
-          🥅
-        </button>
+<div
+  className="card"
+  style={{
+    ...glassCardStyle,
+    padding: isMobile ? 8 : 12,
+    display: "flex",
+    gap: isMobile ? 6 : 8,
+    alignItems: "center",
+    flexWrap: "wrap",
+    marginBottom: 12,
+  }}
+>
+  {/* FILTER KNAPPAR */}
+  <button
+    className={`btn ${showGoalkeepersOnly ? "btn--ok" : "btn--ghost"}`}
+    onClick={() => setShowGoalkeepersOnly((prev) => !prev)}
+  >
+    {showGoalkeepersOnly ? "Visa alla" : "🥅 Målvakter"}
+  </button>
 
-        <button
-          className={`btn ${showAvailableOnly ? "btn--ok" : "btn--ghost"}`}
-          onClick={() => setShowAvailableOnly((p) => !p)}
-        >
-          Lediga
-        </button>
+  <button
+    className={`btn ${showAvailableOnly ? "btn--ok" : "btn--ghost"}`}
+    onClick={() => setShowAvailableOnly((prev) => !prev)}
+  >
+    {showAvailableOnly ? "Visa alla" : "Endast lediga"}
+  </button>
 
-        <button
-          className="iconBtn"
-          onClick={() => toggleToolPanel("batch")}
-        >
-          🧺
-        </button>
+  {/* ✅ BATCH KNAPP MED BADGE */}
+  <button
+    className="iconBtn"
+    style={toolBtnStyle(activeToolPanel === "batch")}
+    onClick={() => toggleToolPanel("batch")}
+  >
+    🧺
+    {selectedJerseyIds.length > 0 && (
+      <span style={floatingBadgeStyle}>
+        {selectedJerseyIds.length}
+      </span>
+    )}
+  </button>
 
-        <button
-          className="iconBtn"
-          onClick={() => toggleToolPanel("import")}
-        >
-          📥
-        </button>
+  {/* IMPORT */}
+  <button
+    className="iconBtn"
+    style={toolBtnStyle(activeToolPanel === "import")}
+    onClick={() => toggleToolPanel("import")}
+  >
+    📥
+  </button>
 
-        <button
-          className="iconBtn"
-          onClick={() => toggleToolPanel("stock")}
-        >
-          📦
-        </button>
+  {/* STOCK */}
+  <button
+    className="iconBtn"
+    style={toolBtnStyle(activeToolPanel === "stock")}
+    onClick={() => toggleToolPanel("stock")}
+  >
+    📦
+  </button>
 
-        <button
-          className="iconBtn"
-          onClick={addManualJersey}
-        >
-          ➕
-        </button>
+  {/* ADD */}
+  <button
+    className="iconBtn"
+    style={toolBtnStyle(false)}
+    onClick={addManualJersey}
+  >
+    ➕
+  </button>
 
-        <button
-          className="iconBtn"
-          onClick={reload}
-        >
-          🔄
-        </button>
+  {/* RELOAD */}
+  <button
+    className="iconBtn"
+    style={toolBtnStyle(false)}
+    onClick={reload}
+  >
+    🔄
+  </button>
 
-        <div style={{ marginLeft: "auto" }}>
-          {selectedJerseyIds.length} markerade
-        </div>
-      </div>
+  {/* ✅ PILLS TILL HÖGER */}
+  <div
+    style={{
+      marginLeft: "auto",
+      display: "flex",
+      gap: 8,
+      flexWrap: "wrap",
+    }}
+  >
+    <Pill tone="neutral">{filteredJerseys.length} visade</Pill>
+
+    {selectedJerseyIds.length > 0 && (
+      <Pill tone="ok">{selectedJerseyIds.length} markerade</Pill>
+    )}
+  </div>
+</div>
     </>
   )}
 
