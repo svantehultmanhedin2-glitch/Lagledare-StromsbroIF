@@ -1648,17 +1648,7 @@ const stickyWrapStyle = {
 </div>
 
 
-{isMobile && (
-  <div className="card" style={{ marginBottom: 10, padding: 10 }}>
-    <button
-      className="btn btn--ghost"
-      onClick={() => setShowToolsMobile((p) => !p)}
-      style={{ width: "100%" }}
-    >
-      {showToolsMobile ? "Dölj verktyg ▲" : "Visa verktyg ▼"}
-    </button>
-  </div>
-)}
+
 
 
       {/* ===== VERKTYGSPANELER ===== */}
