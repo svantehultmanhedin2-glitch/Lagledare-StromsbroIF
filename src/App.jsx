@@ -2220,8 +2220,7 @@ const [assignInlineTeam, setAssignInlineTeam] = useState(teamId);
 
         if (!alive) return;
 
-
-setItems(normalizeSportsGearList(stockData || []));
+        setItems(normalizeSportsGearList(stockData));
         setSportsGearStock(Array.isArray(stockData) ? stockData : []);
         setTeamGear(Array.isArray(teamData) ? teamData : []);
       } catch (e) {
@@ -2239,78 +2238,97 @@ setItems(normalizeSportsGearList(stockData || []));
 useEffect(() => {
   if (!scanOpen) return;
 
-  // ✅ stoppa eventuell tidigare instans
-  if (codeReaderRef.current) {
+  let stream = null;
+  let reader;
+
+  const startCamera = async () => {
     try {
-      codeReaderRef.current.reset();
-    } catch {}
-  }
+      reader = new BrowserMultiFormatReader();
 
-  const reader = new BrowserMultiFormatReader();
-  codeReaderRef.current = reader;
+      // ✅ starta kamera (mobilkompatibel)
+      stream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: "environment" },
+      });
 
-  scanningLockRef.current = false;
+      if (!videoRef.current) return;
 
-  let cancelled = false;
+      videoRef.current.srcObject = stream;
+      await videoRef.current.play();
 
-  const start = async () => {
-    try {
-      await reader.decodeFromVideoDevice(
+      // ✅ korrekt metod för mobil
+      reader.decodeFromVideoDevice(
         null,
         videoRef.current,
         (result, err) => {
 
-          if (cancelled) return;
           if (!result) return;
           if (scanningLockRef.current) return;
 
+          const textClean = result.getText().replace(/\s/g, "").toLowerCase();
+
+          if (!textClean.startsWith("gear:")) return;
+
           scanningLockRef.current = true;
 
-          const text = result.getText().replace(/\s/g, "").toLowerCase();
+          const raw = textClean.replace("gear:", "");
 
-          if (!text.startsWith("gear:")) {
-            scanningLockRef.current = false;
-            return;
-          }
-
-          const raw = text.replace("gear:", "");
-
-          const found = items.find(
+          // ✅ EXAKT MATCH först
+          let found = items.find(
             (x) =>
               `${x.kind}|${x.size || ""}`.toLowerCase() === raw
           );
 
+          // ✅ fallback om något är konstigt (säkerhet)
+          if (!found) {
+            const [kindRaw, sizeRaw] = raw.split("|");
+
+            found = items.find(
+              (x) =>
+                x.kind.toLowerCase() === (kindRaw || "") &&
+                (x.size || "") === (sizeRaw || "")
+            );
+          }
+
           if (found) {
+
+            // ✅ stoppa kamera direkt (hindrar loop)
+            if (videoRef.current?.srcObject) {
+              videoRef.current.srcObject.getTracks().forEach((t) => t.stop());
+            }
+
+            // ✅ haptic feedback (nice UX)
             navigator.vibrate?.(50);
 
             setScannedItem(found);
             setScanOpen(false);
 
           } else {
-            alert(`Ingen match: ${raw}`);
+            alert(`Ingen match hittades för: ${raw}`);
             scanningLockRef.current = false;
+          }
+
+          if (err && err.name !== "NotFoundException") {
+            console.warn(err);
           }
         }
       );
 
     } catch (err) {
       console.error("Camera error:", err);
+      alert("Kameran kunde inte startas");
       setScanOpen(false);
     }
   };
 
-  start();
+  startCamera();
 
   return () => {
-    cancelled = true;
-
-    try {
-      reader.reset();
-    } catch {}
-
+    if (stream) {
+      stream.getTracks().forEach((t) => t.stop());
+    }
     scanningLockRef.current = false;
   };
-}, [scanOpen]);
+}, [scanOpen, items]);
 
 const exportQrPdf = async () => {
   const doc = new jsPDF("p", "mm", "a4");
@@ -2479,7 +2497,7 @@ const adjustStockFromScan = async (kind, size, delta) => {
   /* ===== TEAM GROUP ===== */
   const groupedTeamGear = useMemo(() => {
     const map = {};
-    (teamGear || []).forEach((g) => {
+    teamGear.forEach((g) => {
       const key = `${g.kind}|${g.size || ""}`;
       if (!map[key]) map[key] = { ...g, qty: 0 };
       map[key].qty += Number(g.qty || 0);
@@ -2495,7 +2513,7 @@ const adjustStockFromScan = async (kind, size, delta) => {
 const gearKinds = useMemo(() => {
   return [
     "all",
-    ...new Set((items || []).map((i) => i.kind)),
+    ...new Set(items.map((i) => i.kind)),
   ].sort((a, b) => a.localeCompare(b, "sv"));
 }, [items]);
 
@@ -2623,7 +2641,7 @@ const gearKinds = useMemo(() => {
     )}
 
     
-{(groupedTeamGear || [])
+{groupedTeamGear
   .filter((g) => filterKind === "all" || g.kind === filterKind)
   .map(
 (g) => (
@@ -2739,12 +2757,7 @@ const gearKinds = useMemo(() => {
     {isAdmin && (
     <button
       className="btn btn--ghost"
-      
-  onClick={() => {
-    scanningLockRef.current = false; // ✅ KRITISKT
-    setScanOpen(true);
-  }}
-
+      onClick={() => setScanOpen(true)}
     >
       📷 Skanna
     </button>
@@ -3440,7 +3453,7 @@ const updateItem = async (id, patch) => {
     return;
   }
 
-  const next = (items || []).map((i) =>
+  const next = items.map((i) =>
     i.id === id ? { ...i, ...patch } : i
   );
 
