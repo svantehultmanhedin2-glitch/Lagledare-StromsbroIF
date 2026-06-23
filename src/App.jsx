@@ -2270,30 +2270,33 @@ useEffect(() => {
 
   const raw = text.replace("gear:", "").toLowerCase().trim();
 
-  // ✅ 1. exakt match
-  let found = items.find(
+// dela upp texten i bokstäver + siffror
+const match = raw.match(/^([a-z]+)(\d+)?$/);
+
+let found = null;
+
+if (match) {
+  const [, kindRaw, sizeRaw] = match;
+
+  found = items.find((x) => {
+    const kind = x.kind.toLowerCase();
+
+    return (
+      (kind === kindRaw ||             // vest
+       kind === kindRaw + "s" ||       // vests
+       kind.replace(/s$/, "") === kindRaw) &&  // hanterar plural
+      (!sizeRaw || (x.size || "") === sizeRaw)
+    );
+  });
+}
+
+// fallback (för korrekt format gear:balls|4)
+if (!found) {
+  found = items.find(
     (x) => `${x.kind}|${x.size || ""}` === raw
   );
+}
 
-  // ✅ 2. fallback (t.ex. vest4)
-  if (!found) {
-    const match = raw.match(/^([a-z]+)(\d+)?$/);
-
-    if (match) {
-      const [, kindRaw, sizeRaw] = match;
-
-      found = items.find((x) => {
-        const kindMatch =
-          x.kind === kindRaw ||
-          x.kind === `${kindRaw}s`;
-
-        const sizeMatch =
-          !sizeRaw || (x.size || "") === sizeRaw;
-
-        return kindMatch && sizeMatch;
-      });
-    }
-  }
 
   // ✅ ✅ ENDA stället vi hanterar resultat
   if (found) {
