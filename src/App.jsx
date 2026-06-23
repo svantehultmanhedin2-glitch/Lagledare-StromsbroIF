@@ -2399,8 +2399,18 @@ const adjustStockFromScan = async (kind, size, delta) => {
   const cleaned = next.filter((x) => (Number(x.qty) || 0) > 0);
 
   await persistItems(cleaned);
-};
 
+  // ✅ VIKTIGT: synca dialogen
+  const updated = cleaned.find(
+    (x) => x.kind === kind && (x.size || "") === (size || "")
+  );
+
+  if (updated) {
+    setScannedItem(updated);
+  } else {
+    setScannedItem(null);
+  }
+};
   /* ===== LABELS ===== */
   const gearLabels = {
     balls: "Bollar",
@@ -3134,23 +3144,57 @@ const gearKinds = useMemo(() => {
 
       <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
 
-        <button
-  className="btn"
-  onClick={() =>
-    adjustStockFromScan(scannedItem.kind, scannedItem.size, -1)
-  }
->
-  ➖
-</button>
+<div style={{ marginTop: 12 }}>
 
-<button
-  className="btn"
-  onClick={() =>
-    adjustStockFromScan(scannedItem.kind, scannedItem.size, +1)
-  }
->
-  ➕
-</button>
+  {/* ✅ MINUS */}
+  <div style={{ display: "flex", gap: 6, marginBottom: 6 }}>
+    <button
+      className="btn"
+      onClick={() => adjustStockFromScan(scannedItem.kind, scannedItem.size, -10)}
+    >
+      −10
+    </button>
+
+    <button
+      className="btn"
+      onClick={() => adjustStockFromScan(scannedItem.kind, scannedItem.size, -5)}
+    >
+      −5
+    </button>
+
+    <button
+      className="btn"
+      onClick={() => adjustStockFromScan(scannedItem.kind, scannedItem.size, -1)}
+    >
+      −1
+    </button>
+  </div>
+
+  {/* ✅ PLUS */}
+  <div style={{ display: "flex", gap: 6 }}>
+    <button
+      className="btn"
+      onClick={() => adjustStockFromScan(scannedItem.kind, scannedItem.size, +1)}
+    >
+      +1
+    </button>
+
+    <button
+      className="btn"
+      onClick={() => adjustStockFromScan(scannedItem.kind, scannedItem.size, +5)}
+    >
+      +5
+    </button>
+
+    <button
+      className="btn"
+      onClick={() => adjustStockFromScan(scannedItem.kind, scannedItem.size, +10)}
+    >
+      +10
+    </button>
+  </div>
+
+</div>
 
       </div>
 
