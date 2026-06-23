@@ -2291,13 +2291,6 @@ useEffect(() => {
 
           if (found) {
 
-            // ✅ stoppa kamera direkt (hindrar loop)
-            if (videoRef.current?.srcObject) {
-              videoRef.current.srcObject.getTracks().forEach((t) => t.stop());
-            }
-
-  scanningLockRef.current = false; // ✅ viktigt
-
             // ✅ haptic feedback (nice UX)
             navigator.vibrate?.(50);
 
