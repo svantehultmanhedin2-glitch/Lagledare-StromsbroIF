@@ -10,6 +10,13 @@ import {
   Tooltip,
 } from "recharts";
 
+import QRCode from "react-qr-code";
+import { BrowserMultiFormatReader } from "@zxing/browser";
+
+import * as QRCodeLib from "qrcode";
+import jsPDF from "jspdf";
+
+
 // ===== API: HUVUDLAGER =====
 async function apiLoadWarehouse() {
   const r = await fetch("/api/warehouse");
@@ -159,6 +166,8 @@ const uuid = () =>
     ? crypto.randomUUID()
     : `${Date.now()}-${Math.random().toString(16).slice(2)}`;
 
+
+
 /* ================= Storage ================= */
 const jget = (k, fallback) => {
   try {
@@ -288,6 +297,7 @@ position:
     extras: it.extras ?? { shorts: null, socks: null },
   }));
 }
+
 
 
 /* ================= Simple PIN hashing (local-only, not strong crypto) ================= */
@@ -2156,44 +2166,172 @@ const stickyWrapStyle = {
 
 
 /* ================= Page: Sports Gear ================= */
-function SportsGearPage({ user }) {
+
+function SportsGearPage({ user, teamId }) {
   const isAdmin = user.role === "admin";
+
   const [showForm, setShowForm] = useState(false);
   const [items, setItems] = useState([]);
 
-  // formulär för ny rad
+  const [filterKind, setFilterKind] = useState("all");
+  
+  //scanner
+
+const [scanOpen, setScanOpen] = useState(false);
+const [scannedItem, setScannedItem] = useState(null);
+const videoRef = useRef(null);
+const codeReaderRef = useRef(null);
+
+  // formulär
   const [kind, setKind] = useState("");
   const [size, setSize] = useState("");
   const [qty, setQty] = useState("");
   const [lowStockAt, setLowStockAt] = useState("");
 
-  // inline edit
+  // ✅ ENDES BRA STATE
+  const [teamGear, setTeamGear] = useState([]);
+  const [sportsGearStock, setSportsGearStock] = useState([]);
+
+  const [assignGearOpen, setAssignGearOpen] = useState(false);
+  const [selectedGearKind, setSelectedGearKind] = useState("");
+  const [selectedGearSize, setSelectedGearSize] = useState("");
+  const [assignQty, setAssignQty] = useState("");
+
+  // edit
   const [editingId, setEditingId] = useState(null);
   const [editKind, setEditKind] = useState("");
   const [editSize, setEditSize] = useState("");
   const [editQty, setEditQty] = useState("");
   const [editLowStockAt, setEditLowStockAt] = useState("");
 
+  /* ===== LOAD ===== */
   useEffect(() => {
     let alive = true;
 
     (async () => {
       try {
-        const data = await apiLoadSportsGear();
+        const [stockData, teamData] = await Promise.all([
+          apiLoadSportsGear(),
+          apiLoadTeamGear(teamId),
+        ]);
+
         if (!alive) return;
-        setItems(normalizeSportsGearList(data));
+
+        setItems(normalizeSportsGearList(stockData));
+        setSportsGearStock(Array.isArray(stockData) ? stockData : []);
+        setTeamGear(Array.isArray(teamData) ? teamData : []);
       } catch (e) {
         console.error(e);
         if (!alive) return;
+
         setItems([]);
+        setTeamGear([]);
       }
     })();
 
-    return () => {
-      alive = false;
-    };
-  }, []);
+    return () => (alive = false);
+  }, [teamId]);
 
+useEffect(() => {
+  if (!scanOpen) return;
+
+  let active = true;
+  const reader = new BrowserMultiFormatReader();
+
+  codeReaderRef.current = reader;
+
+  reader.decodeFromVideoDevice(
+    null,
+    videoRef.current,
+    (result, err) => {
+      if (!active) return;
+
+      if (result) {
+        const text = result.getText();
+
+        if (text.startsWith("gear:")) {
+          const key = text.replace("gear:", "");
+
+          const found = items.find(
+            (x) =>
+              `${x.kind}|${x.size || ""}` === key
+          );
+
+          if (found) {
+            setScannedItem(found);
+            setScanOpen(false);
+          }
+        }
+      }
+    }
+  );
+
+  return () => {
+    active = false;
+
+    if (reader) {
+      reader.stopContinuousDecode?.();
+    }
+  };
+}, [scanOpen, items]);
+
+const exportQrPdf = async () => {
+  const doc = new jsPDF("p", "mm", "a4");
+
+  // ✅ exakt från din etikett
+  const cols = 4;
+  const rows = 6;
+
+  const labelSize = 40; // 40mm x 40mm
+
+  // ✅ marginaler (justeras vid behov)
+  const marginX = 10;
+  const marginY = 12;
+
+  // ✅ QR storlek (lite mindre än etiketten)
+  const qrSize = 32;
+
+  let index = 0;
+
+  for (let r = 0; r < rows; r++) {
+    for (let c = 0; c < cols; c++) {
+
+      if (index >= items.length) break;
+
+      const g = items[index];
+
+      const value = `gear:${g.kind}|${g.size || ""}`;
+      const qrDataUrl = await QRCodeLib.toDataURL(value);
+
+      const x = marginX + c * labelSize;
+      const y = marginY + r * labelSize;
+
+      // ✅ QR centrerad horisontellt
+      const qrX = x + (labelSize - qrSize) / 2;
+      const qrY = y + 3;
+
+      doc.addImage(qrDataUrl, "PNG", qrX, qrY, qrSize, qrSize);
+
+      // ✅ TEXT under QR (centrerad)
+      doc.setFontSize(7);
+
+      const label = `${gearLabels[g.kind] || g.kind}${g.size ? " " + g.size : ""}`;
+
+      doc.text(
+        label,
+        x + labelSize / 2,
+        y + labelSize - 3,
+        { align: "center" }
+      );
+
+      index++;
+    }
+  }
+
+  doc.save("qr-etiketter-40x40.pdf");
+};
+
+  /* ===== LABELS ===== */
   const gearLabels = {
     balls: "Bollar",
     vests: "Västar",
@@ -2212,6 +2350,7 @@ function SportsGearPage({ user }) {
     other: "📦",
   };
 
+  /* ===== NORMALIZE ===== */
   function normalizeSportsGearList(list) {
     const map = {};
 
@@ -2237,27 +2376,40 @@ function SportsGearPage({ user }) {
 
       map[key].qty += qtyNum;
 
-      // Om samma rad finns flera gånger, behåll ett tydligt lowStockAt-värde
       if (thresholdNum > 0) {
         map[key].lowStockAt = thresholdNum;
       }
     });
 
-    return Object.values(map).sort((a, b) => {
-      const labelA = `${gearLabels[a.kind] || a.kind} ${a.size || ""}`;
-      const labelB = `${gearLabels[b.kind] || b.kind} ${b.size || ""}`;
-      return labelA.localeCompare(labelB, "sv");
-    });
+    return Object.values(map);
   }
 
-  const totalQty = useMemo(() => {
-    return items.reduce((sum, g) => sum + (Number(g.qty) || 0), 0);
-  }, [items]);
+  /* ===== TEAM GROUP ===== */
+  const groupedTeamGear = useMemo(() => {
+    const map = {};
+    teamGear.forEach((g) => {
+      const key = `${g.kind}|${g.size || ""}`;
+      if (!map[key]) map[key] = { ...g, qty: 0 };
+      map[key].qty += Number(g.qty || 0);
+    });
+    return Object.values(map);
+  }, [teamGear]);
+
+  const totalQty = useMemo(
+    () => items.reduce((sum, g) => sum + (Number(g.qty) || 0), 0),
+    [items]
+  );
+
+const gearKinds = useMemo(() => {
+  return [
+    "all",
+    ...new Set(items.map((i) => i.kind)),
+  ].sort((a, b) => a.localeCompare(b, "sv"));
+}, [items]);
 
   const isLowStock = (item) => {
     const threshold = Number(item?.lowStockAt) || 0;
-    if (threshold <= 0) return false;
-    return Number(item?.qty) <= threshold;
+    return threshold > 0 && Number(item?.qty) <= threshold;
   };
 
   const persistItems = async (next) => {
@@ -2267,14 +2419,12 @@ function SportsGearPage({ user }) {
     return normalized;
   };
 
+  /* ===== ADD ===== */
   const addItem = async () => {
     const amount = Math.max(0, Number(qty) || 0);
     const threshold = Math.max(0, Number(lowStockAt) || 0);
 
-    if (!kind || amount <= 0) {
-      alert("Välj typ och ange ett antal större än 0.");
-      return;
-    }
+    if (!kind || amount <= 0) return;
 
     const next = [...items];
 
@@ -2289,7 +2439,7 @@ function SportsGearPage({ user }) {
       next.push({
         id: uuid(),
         kind,
-        size: size || "",
+        size,
         qty: amount,
         lowStockAt: threshold,
       });
@@ -2304,121 +2454,228 @@ function SportsGearPage({ user }) {
     setShowForm(false);
   };
 
-  const updateGroupedQty = async (kindToChange, sizeToChange, delta) => {
-    const next = [...items];
+  /* ===== ASSIGN ===== */
+  const saveAssignedGear = async () => {
+    const q = Math.max(0, Number(assignQty) || 0);
+    if (!selectedGearKind || q <= 0) return;
 
-    const target = next.find(
-      (x) =>
-        x.kind === kindToChange &&
-        (x.size || "") === (sizeToChange || "")
-    );
+    const next = [...teamGear];
 
-    if (!target) return;
-
-    const nextQty = Math.max(0, (Number(target.qty) || 0) + delta);
-    target.qty = nextQty;
-
-    const cleaned = next.filter((x) => (Number(x.qty) || 0) > 0);
-
-    await persistItems(cleaned);
-  };
-
-  const removeGroupedRow = async (kindToRemove, sizeToRemove) => {
-    const next = items.filter(
-      (x) =>
-        !(
-          x.kind === kindToRemove &&
-          (x.size || "") === (sizeToRemove || "")
-        )
-    );
-
-    await persistItems(next);
-  };
-
-  const startEditRow = (row) => {
-    setEditingId(row.id);
-    setEditKind(row.kind);
-    setEditSize(row.size || "");
-    setEditQty(String(row.qty ?? ""));
-    setEditLowStockAt(String(row.lowStockAt ?? ""));
-  };
-
-  const cancelEditRow = () => {
-    setEditingId(null);
-    setEditKind("");
-    setEditSize("");
-    setEditQty("");
-    setEditLowStockAt("");
-  };
-
-  const saveEditRow = async (row) => {
-    const newQty = Math.max(0, Number(editQty) || 0);
-    const newThreshold = Math.max(0, Number(editLowStockAt) || 0);
-    const newKind = String(editKind || "").trim().toLowerCase();
-    const newSize = String(editSize || "").trim();
-
-    if (!newKind || newQty <= 0) {
-      alert("Typ och antal måste vara ifyllt.");
-      return;
-    }
-
-    // Ta bort gamla raden
-    let next = items.filter((x) => x.id !== row.id);
-
-    // Om ny kombination redan finns → merge
     const existing = next.find(
       (x) =>
-        x.kind === newKind &&
-        (x.size || "") === (newSize || "")
+        x.kind === selectedGearKind &&
+        (x.size || "") === (selectedGearSize || "")
     );
 
-    if (existing) {
-      existing.qty += newQty;
-      existing.lowStockAt = newThreshold;
-    } else {
-      next.push({
-        id: row.id,
-        kind: newKind,
-        size: newSize,
-        qty: newQty,
-        lowStockAt: newThreshold,
-      });
-    }
+    if (existing) existing.qty += q;
+    else next.push({ kind: selectedGearKind, size: selectedGearSize, qty: q });
 
-    await persistItems(next);
-    cancelEditRow();
+    const res = await assignSportsGearToTeam(teamId, next);
+
+    setTeamGear(res.teamGear);
+    setSportsGearStock(res.stock);
+    setAssignGearOpen(false);
   };
 
+  /* ===== RETURN ===== */
+  const returnGearToStock = async (kind, size) => {
+    const item = teamGear.find(
+      (x) => x.kind === kind && (x.size || "") === (size || "")
+    );
+    if (!item) return;
+
+    if (!confirm("Returnera material?")) return;
+
+    const qtyNum = Number(item.qty) || 0;
+
+    const nextTeam = teamGear.filter(
+      (x) => !(x.kind === kind && (x.size || "") === (size || ""))
+    );
+
+    const stock = [...sportsGearStock];
+    const existing = stock.find(
+      (s) => s.kind === kind && (s.size || "") === (size || "")
+    );
+
+    if (existing) existing.qty += qtyNum;
+    else stock.push({ kind, size, qty: qtyNum });
+
+    await apiSaveTeamGear(teamId, nextTeam);
+    await apiSaveSportsGear(stock);
+
+    setTeamGear(nextTeam);
+    setSportsGearStock(stock);
+  };
+
+  /* ===== UI ===== */
   return (
     <div>
-      {/* Översikt */}
-      <div className="summaryCard">
-        <div
-          style={{
-            display: "flex",
-            justifyContent: "space-between",
-            alignItems: "center",
-            gap: 10,
-            flexWrap: "wrap",
-          }}
-        >
-          <div className="summaryTitle">Idrottsmaterial</div>
+      {/* ✅ TEAM */}
+<div className="card" style={{ marginTop: 12 }}>
+  <div className="card__top">
+    <div className="card__title">Lagets material</div>
 
-          {isAdmin && (
-            <button
-              className="btn btn--primary"
-              onClick={() => setShowForm(true)}
-              style={{ whiteSpace: "nowrap" }}
-            >
-              + Lägg till
-            </button>
+    {isAdmin && (
+      <button
+        className="btn btn--ghost"
+        onClick={() => setAssignGearOpen((p) => !p)}
+      >
+        Tilldela
+      </button>
+    )}
+  </div>
+
+  <div className="history" style={{ marginTop: 10 }}>
+    {groupedTeamGear.length === 0 && (
+      <div className="empty">Inget material</div>
+    )}
+
+    
+{groupedTeamGear
+  .filter((g) => filterKind === "all" || g.kind === filterKind)
+  .map(
+(g) => (
+      <div
+        key={g.kind + g.size}
+        className="historyRow"
+        style={{
+          display: "grid",
+          gridTemplateColumns: "1fr auto auto",
+          gap: 12,
+          alignItems: "center",
+          padding: "10px 12px",
+          borderRadius: 12,
+          marginBottom: 6,
+          background: "rgba(255,255,255,.03)",
+          border: "1px solid rgba(157,179,216,.12)",
+        }}
+      >
+        {/* ✅ LEFT INFO */}
+        <div style={{ display: "flex", flexDirection: "column" }}>
+          <div style={{ fontWeight: 700 }}>
+            {gearIcons[g.kind]} {gearLabels[g.kind] || g.kind}
+          </div>
+
+          {g.size && (
+            <div style={{ fontSize: 12, opacity: 0.75 }}>
+              Storlek: {g.size}
+            </div>
           )}
         </div>
 
-        <div className="summaryValue">{items.length}</div>
-        <div className="summarySub">
-          Materialrader i lager · totalt {totalQty} st
+        {/* ✅ MIDDLE COUNT */}
+        <strong>{g.qty} st</strong>
+
+        {/* ✅ RIGHT ACTION */}
+        {isAdmin && (
+          <button
+            className="iconBtn"
+            title="Returnera"
+            onClick={() => returnGearToStock(g.kind, g.size)}
+          >
+            ↩️
+          </button>
+        )}
+      </div>
+    ))}
+  </div>
+</div>
+
+
+      {/* ✅ ASSIGN PANEL */}
+      {assignGearOpen && isAdmin && (
+        <div className="card">
+          <div className="formGrid">
+            <select onChange={(e) => setSelectedGearKind(e.target.value)}>
+              <option value="">Typ</option>
+              {Object.keys(gearLabels).map((k) => (
+                <option key={k} value={k}>{gearLabels[k]}</option>
+              ))}
+            </select>
+
+            <input
+              placeholder="Storlek"
+              onChange={(e) => setSelectedGearSize(e.target.value)}
+            />
+
+            <input
+              placeholder="Antal"
+              onChange={(e) => setAssignQty(e.target.value)}
+            />
+          </div>
+
+          <button className="btn btn--ok" onClick={saveAssignedGear}>
+            Spara
+          </button>
         </div>
+      )}
+
+      {/* ✅ ALL DIN ORIGINAL KOD ÄR KVAR UNDER */}
+      {/* Översikt */}
+      <div className="summaryCard">
+        <div
+  style={{
+    display: "flex",
+    justifyContent: "space-between",
+    alignItems: "center",
+    gap: 10,
+  }}
+>
+  {/* ✅ TITEL */}
+  <div className="summaryTitle">Idrottsmaterial</div>
+
+  {/* ✅ KNAPPGRUPP */}
+  <div
+    style={{
+      display: "flex",
+      gap: 8,
+      alignItems: "center",
+    }}
+  >
+
+    {/* Lägg till */}
+    {isAdmin && (
+      <button
+        className="btn btn--primary"
+        onClick={() => setShowForm(true)}
+      >
+        + Lägg till
+      </button>
+    )}
+
+    {/* Skanna */}
+    {isAdmin && (
+    <button
+      className="btn btn--ghost"
+      onClick={() => setScanOpen(true)}
+    >
+      📷 Skanna
+    </button>
+    )}
+    
+    {/* Exportera */}
+    {isAdmin && (
+      <button
+        className="btn btn--ghost"
+        onClick={exportQrPdf}
+      >
+        🧾 Exportera
+      </button>
+    )}
+  </div>
+</div>
+        <div className="summaryValue">{items.length}</div>
+        
+<div className="summarySub">
+  Materialrader i lager · totalt {totalQty} st
+</div>
+
+{items.some(isLowStock) && (
+  <div style={{ marginTop: 6, color: "#ef4444", fontWeight: 700 }}>
+    ⚠️ Lågt lager finns
+  </div>
+)}
+
       </div>
 
       {/* Form för ny rad */}
@@ -2498,6 +2755,23 @@ function SportsGearPage({ user }) {
         </div>
       )}
 
+<div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginTop: 10 }}>
+  {gearKinds.map((k) => (
+    <button
+      key={k}
+      className="btn btn--ghost"
+      onClick={() => setFilterKind(k)}
+      style={
+        filterKind === k
+          ? { outline: "2px solid #1e5bbf" }
+          : {}
+      }
+    >
+      {k === "all" ? "Alla" : gearLabels[k] || k}
+    </button>
+  ))}
+</div>
+
       {/* Lagerlista */}
       <div className="card" style={{ marginTop: 12 }}>
         <div className="card__top">
@@ -2510,7 +2784,11 @@ function SportsGearPage({ user }) {
             <div className="empty">Inget material i lager ännu</div>
           )}
 
-          {items.map((g) => {
+          
+{items
+  .filter((g) => filterKind === "all" || g.kind === filterKind)
+  .map((g) => {
+
             const low = isLowStock(g);
 
             if (editingId === g.id) {
@@ -2602,16 +2880,19 @@ function SportsGearPage({ user }) {
                 key={g.id}
                 className="historyRow"
                 style={{
-                  padding: "8px 10px",
-                  borderRadius: 12,
-                  marginBottom: 6,
-                  background: low
-                    ? "rgba(239,68,68,.08)"
-                    : "rgba(255,255,255,.03)",
-                  border: low
-                    ? "1px solid rgba(239,68,68,.28)"
-                    : "1px solid rgba(157,179,216,.12)",
-                }}
+  display: "grid",
+  gridTemplateColumns: "1fr auto",
+  gap: 12,
+  padding: "10px 12px",
+  borderRadius: 12,
+  marginBottom: 6,
+  background: low
+    ? "rgba(239,68,68,.08)"
+    : "rgba(255,255,255,.03)",
+  border: low
+    ? "1px solid rgba(239,68,68,.25)"
+    : "1px solid rgba(157,179,216,.12)",
+}}
               >
                 <div
                   style={{
@@ -2623,42 +2904,41 @@ function SportsGearPage({ user }) {
                   }}
                 >
                   {/* Info */}
-                  <div style={{ minWidth: 0, flex: "1 1 220px" }}>
-                    <div
-                      style={{
-                        display: "flex",
-                        gap: 8,
-                        alignItems: "center",
-                        flexWrap: "wrap",
-                        fontWeight: 700,
-                        fontSize: 14,
-                      }}
-                    >
-                      <span>{gearIcons[g.kind] || "📦"}</span>
-                      <span>{gearLabels[g.kind] || g.kind}</span>
-                    </div>
+                  <div style={{ display: "flex", flexDirection: "column" }}>
+  <div style={{ fontWeight: 700 }}>
+    {gearIcons[g.kind]} {gearLabels[g.kind] || g.kind}
+  </div>
 
-                    <div
-                      style={{
-                        fontSize: 12,
-                        opacity: 0.8,
-                        marginTop: 2,
-                        display: "flex",
-                        gap: 8,
-                        flexWrap: "wrap",
-                      }}
-                    >
-                      {g.size && <span>Storlek {g.size}</span>}
-                      <span>{g.qty} st</span>
-                      <span>Varningsnivå: {g.lowStockAt || 0}</span>
+  <div style={{ fontSize: 12, opacity: 0.75 }}>
+    {g.size && `Storlek ${g.size} · `}
+    {g.qty} st · Varning: {g.lowStockAt || 0}
+  </div>
 
-                      {low && (
-                        <span style={{ color: "#ef4444", fontWeight: 700 }}>
-                          ⚠️ Lågt lager
-                        </span>
-                      )}
-                    </div>
-                  </div>
+  {low && (
+    <div style={{ color: "#ef4444", fontSize: 12, fontWeight: 700 }}>
+      ⚠️ Lågt lager
+    </div>
+  )}
+</div>
+
+{scanOpen && (
+  <div className="card" style={{ marginTop: 12 }}>
+    <div className="card__title">Skanna QR</div>
+
+    <video
+      ref={videoRef}
+      style={{ width: "100%", borderRadius: 12 }}
+    />
+
+    <button
+      className="btn btn--ghost"
+      onClick={() => setScanOpen(false)}
+      style={{ marginTop: 10 }}
+    >
+      Stäng
+    </button>
+  </div>
+)}
 
                   {/* Actions */}
                   <div
@@ -2707,6 +2987,8 @@ function SportsGearPage({ user }) {
                         >
                           🗑️
                         </button>
+
+                        <QRCode value={`gear:${g.kind}|${g.size || ""}`} size={64} />
                       </>
                     )}
                   </div>
@@ -2724,16 +3006,7 @@ function SportsGearPage({ user }) {
 function MatchKitPage({ user, teamId, teamsVisible }) {
   const isAdmin = user.role === "admin";
 
-const [sportsGearStock, setSportsGearStock] = useState([]);
-const [assignGearOpen, setAssignGearOpen] = useState(false);
-const [selectedGearKind, setSelectedGearKind] = useState("");
-const [selectedGearSize, setSelectedGearSize] = useState("");
-const [assignQty, setAssignQty] = useState("");
-
   const [showOnlyGoalkeepers, setShowOnlyGoalkeepers] = useState(false);
-const [sportsGear, setSportsGear] = useState([]);
-const [showGear, setShowGear] = useState(false);
-
 
 
   // Matchtröjor för valt lag
@@ -2761,154 +3034,6 @@ const cancelEditTeamExtras = () => {
 const capitalize = (s) =>
   s ? s.charAt(0).toUpperCase() + s.slice(1) : "";
 
-const groupedGear = useMemo(() => {
-  const map = {};
-
-  (sportsGear || []).forEach((g) => {
-    const key = `${g.kind}|${g.size || ""}`;
-
-    if (!map[key]) {
-      map[key] = {
-        kind: g.kind,
-        size: g.size,
-        qty: 0,
-      };
-    }
-
-    map[key].qty += Number(g.qty) || 0;
-  });
-
-  return Object.values(map);
-}, [sportsGear]);
-
-const gearIcons = {
-  balls: "🏀",
-  vests: "🦺",
-  cones: "🔺",
-  medical: "🩹",
-  gloves: "🧤",
-};
-
-const gearLabels = {
-  balls: "Bollar",
-  vests: "Västar",
-  cones: "Koner",
-  medical: "Sjukvårdsmaterial",
-  gloves: "Målvaktshandskar",
-};
-
-const gearKinds = useMemo(() => {
-  return [...new Set((sportsGearStock || []).map((g) => g.kind))].sort((a, b) =>
-    a.localeCompare(b, "sv")
-  );
-}, [sportsGearStock]);
-
-const gearSizesForSelectedKind = useMemo(() => {
-  return (sportsGearStock || [])
-    .filter((g) => g.kind === selectedGearKind)
-    .map((g) => g.size || "")
-    .filter((v, i, arr) => arr.indexOf(v) === i)
-    .sort((a, b) => a.localeCompare(b, "sv"));
-}, [sportsGearStock, selectedGearKind]);
-
-const saveAssignedGear = async () => {
-  const qty = Math.max(0, Number(assignQty) || 0);
-  if (!selectedGearKind || qty <= 0) {
-    alert("Välj material och ange ett antal.");
-    return;
-  }
-
-  const next = [...sportsGear];
-  const existing = next.find(
-    (x) =>
-      x.kind === selectedGearKind &&
-      (x.size || "") === (selectedGearSize || "")
-  );
-
-  if (existing) {
-    existing.qty += qty;
-  } else {
-    next.push({
-      kind: selectedGearKind,
-      size: selectedGearSize || "",
-      qty,
-    });
-  }
-
-
-  
-  try {
-    const res = await assignSportsGearToTeam(teamId, next);
-
-    setSportsGear(res.teamGear);
-    setSportsGearStock(res.stock);
-
-    setAssignGearOpen(false);
-    setSelectedGearKind("");
-    setSelectedGearSize("");
-    setAssignQty("");
-  } catch (err) {
-    console.error(err);
-    alert(err.message || "Kunde inte tilldela material.");
-  }
-};
-
-const returnGearToStock = async (kind, size) => {
-  try {
-    const currentTeamGear = [...sportsGear];
-
-    const item = currentTeamGear.find(
-      (x) =>
-        x.kind === kind &&
-        (x.size || "") === (size || "")
-    );
-
-    if (!item) return;
-
-    if (!confirm("Returnera material till huvudlager?")) return;
-
-    const qtyToReturn = Number(item.qty) || 0;
-
-    // ✅ 1. Ta bort från lag
-    const nextTeamGear = currentTeamGear.filter(
-      (x) =>
-        !(
-          x.kind === kind &&
-          (x.size || "") === (size || "")
-        )
-    );
-
-    // ✅ 2. Lägg tillbaka i sports-gear lager
-    const stock = [...sportsGearStock];
-
-    const existingStock = stock.find(
-      (s) =>
-        s.kind === kind &&
-        (s.size || "") === (size || "")
-    );
-
-    if (existingStock) {
-      existingStock.qty += qtyToReturn;
-    } else {
-      stock.push({
-        id: `${kind}-${size || "nosize"}`,
-        kind,
-        size: size || "",
-        qty: qtyToReturn,
-      });
-    }
-
-    await apiSaveTeamGear(teamId, nextTeamGear);
-    await apiSaveSportsGear(stock);
-
-    setSportsGear(nextTeamGear);
-    setSportsGearStock(stock);
-
-  } catch (err) {
-    console.error(err);
-    alert("Kunde inte returnera material");
-  }
-};
 
 const addDraftRow = (kind) => {
   setDraftTeamExtras((prev) => ({
@@ -2971,73 +3096,58 @@ const [assignOnlyGoalkeepers, setAssignOnlyGoalkeepers] = useState(false);
     teamsVisible.find((t) => t.id !== teamId)?.id ?? teamId
   );
 
-  // Ladda data
-  useEffect(() => {
+
+// Ladda data
+useEffect(() => {
   let alive = true;
 
   (async () => {
     try {
 
-      // ✅ 1. Ladda huvuddata
+      // ✅ Ladda all data parallellt
       const [matchkitData, warehouseData, extrasData] = await Promise.all([
         apiLoadMatchKit(teamId),
         apiLoadWarehouse(),
         apiLoadTeamExtras(teamId),
       ]);
 
-      // ✅ 2. Ladda gear separat
-      let gearData = [];
-      let sportsGearStockData = [];
-
-      try {
-        gearData = await apiLoadTeamGear(teamId);
-      } catch (e) {
-        console.warn("kunde inte ladda team gear", e);
-      }
-
-      try {
-        sportsGearStockData = await apiLoadSportsGear();
-      } catch (e) {
-        console.warn("kunde inte ladda sports gear", e);
-      }
-
       if (!alive) return;
 
-      // ✅ 3. SET STATE (ALLT SAMLAT HÄR)
+      // ✅ Matchkit
       setItems(normalizeMatchkit(matchkitData));
+
+      // ✅ Warehouse
       setWarehouseItems(normalizeWarehouse(warehouseData));
 
+      // ✅ Team extras
       const normalizedExtras = normalizeTeamExtras(extrasData);
       setTeamExtras(normalizedExtras);
       setDraftTeamExtras(normalizedExtras);
 
-      setSportsGear(Array.isArray(gearData) ? gearData : []);
-      setSportsGearStock(
-        Array.isArray(sportsGearStockData)
-          ? sportsGearStockData
-          : []
-      );
-
+      // ✅ Reset UI-state
       setSelected([]);
       setMoveFrom(teamId);
+
       setMoveTo(
         teamsVisible.find((t) => t.id !== teamId)?.id ?? teamId
       );
+
       setEditingTeamExtras(false);
 
     } catch (e) {
       console.error(e);
+
       if (!alive) return;
 
+      // ✅ Fallback (viktigt för stabil UI)
       setItems([]);
       setWarehouseItems([]);
       setTeamExtras({ shorts: [], socks: [] });
-
-      // ✅ även reset för gear
-      setSportsGear([]);
-      setSportsGearStock([]);
+      setDraftTeamExtras({ shorts: [], socks: [] }); // ✅ du saknade denna
 
       setSelected([]);
+      setMoveFrom(teamId);
+      setMoveTo(teamId);
     }
   })();
 
@@ -3045,7 +3155,6 @@ const [assignOnlyGoalkeepers, setAssignOnlyGoalkeepers] = useState(false);
     alive = false;
   };
 }, [teamId, teamsVisible]);
-
 
 
 
@@ -3257,177 +3366,7 @@ const returnToWarehouse = async (itemId) => {
     ➕
   </button>
 
-        
-<button
-  className="btn btn--ghost"
-  style={{ marginTop: 6 }}
-  onClick={() => setShowGear((prev) => !prev)}
->
-  Idrottsmaterial ▾
-</button>
-
-{isAdmin && (
-  <button
-    className="btn btn--ghost"
-    style={{ marginTop: 6, marginLeft: 8 }}
-    onClick={() => setAssignGearOpen((prev) => !prev)}
-  >
-    Tilldela material
-  </button>
-)}
-
-
-
       </div>
-      
-{showGear && (
-  <div className="card" style={{ marginTop: 10 }}>
-    {groupedGear.length === 0 && (
-      <div className="empty">Inget material tilldelat</div>
-    )}
-
-    {groupedGear.map((g, idx) => (
-  <div
-    key={`${g.kind}-${g.size || "nosize"}`}
-    className="historyRow"
-    style={{
-      display: "grid",
-      gridTemplateColumns: "1fr auto auto",
-      gap: 10,
-      alignItems: "center",
-      padding: "8px 12px",
-      borderRadius: 12,
-      marginBottom: 6,
-      background: "rgba(255,255,255,.03)",
-      border: "1px solid rgba(157,179,216,.12)",
-    }}
-  >
-    {/* ✅ INFO */}
-    <div>
-      <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
-        <span>{gearIcons[g.kind] || "📦"}</span>
-
-        <strong>
-          {gearLabels[g.kind] || g.kind}
-        </strong>
-
-        {g.size && (
-          <span style={{ fontSize: 12, opacity: 0.8 }}>
-            – storlek {g.size}
-          </span>
-        )}
-      </div>
-    </div>
-
-    {/* ✅ ANTAL */}
-    <strong>{g.qty} st</strong>
-
-    {/* ✅ ACTION */}
-    {isAdmin && (
-      <button
-        className="iconBtn"
-        title="Returnera till lager"
-        onClick={() => returnGearToStock(g.kind, g.size)}
-      >
-        ↩️
-      </button>
-    )}
-  </div>
-))}
-  </div>
-)}
-
-{assignGearOpen && (
-  <div className="card" style={{ marginTop: 10 }}>
-    <div className="card__top">
-      <div className="card__title">Tilldela material till laget</div>
-
-      <button
-        className="btn btn--ghost"
-        onClick={() => setAssignGearOpen(false)}
-      >
-        Stäng
-      </button>
-    </div>
-
-    <div className="formGrid" style={{ marginTop: 10 }}>
-      <div className="field">
-        <span>Typ</span>
-        <select
-          value={selectedGearKind}
-          onChange={(e) => {
-            setSelectedGearKind(e.target.value);
-            setSelectedGearSize("");
-          }}
-        >
-          <option value="">Välj typ</option>
-          {gearKinds.map((k) => (
-            <option key={k} value={k}>
-              {gearLabels[k] || k}
-            </option>
-          ))}
-        </select>
-      </div>
-
-      <div className="field">
-        <span>Storlek</span>
-        <select
-          value={selectedGearSize}
-          onChange={(e) => setSelectedGearSize(e.target.value)}
-        >
-          <option value="">Ingen / valfri</option>
-          {gearSizesForSelectedKind.map((s) => (
-            <option key={s || "nosize"} value={s}>
-              {s || "Ingen storlek"}
-            </option>
-          ))}
-        </select>
-      </div>
-
-      <div className="field">
-        <span>Antal</span>
-        <input
-          value={assignQty}
-          onChange={(e) => setAssignQty(e.target.value)}
-          inputMode="numeric"
-          placeholder="t.ex. 10"
-        />
-      </div>
-    </div>
-
-    <div className="history" style={{ marginTop: 12 }}>
-      {(sportsGearStock || [])
-        .filter((g) => !selectedGearKind || g.kind === selectedGearKind)
-        .filter((g) => !selectedGearSize || (g.size || "") === selectedGearSize)
-        .map((g) => (
-          <div key={g.id} className="historyRow">
-            <div>
-              {gearLabels[g.kind] || g.kind} {g.size && `(${g.size})`}
-            </div>
-            <strong>{g.qty} st i lager</strong>
-          </div>
-        ))}
-    </div>
-
-    <div className="btnRow" style={{ marginTop: 10 }}>
-      <button className="btn btn--ok" onClick={saveAssignedGear}>
-        Spara
-      </button>
-
-      <button
-        className="btn btn--ghost"
-        onClick={() => {
-          setAssignGearOpen(false);
-          setSelectedGearKind("");
-          setSelectedGearSize("");
-          setAssignQty("");
-        }}
-      >
-        Avbryt
-      </button>
-    </div>
-  </div>
-)}
 
 {assignFromWarehouseOpen && (
   <div className="card" style={{ marginTop: 12 }}>
@@ -4861,7 +4800,15 @@ function AuthedApp({ auth, route, nav }) {
   const renderPage = () => {
 if (route === "/warehouse") return <WarehouseMatchkitPage user={auth.user} />;    
 
-if (route === "/sportsgear") return <SportsGearPage user={auth.user} />;
+
+if (route === "/sportsgear")
+  return (
+    <SportsGearPage
+      user={auth.user}
+      teamId={activeTeamId}
+    />
+  );
+
 
 if (route === "/matchkit")
       return (
