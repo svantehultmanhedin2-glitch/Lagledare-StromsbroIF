@@ -2238,92 +2238,51 @@ const [assignInlineTeam, setAssignInlineTeam] = useState(teamId);
 useEffect(() => {
   if (!scanOpen) return;
 
-  let stream = null;
-  let reader;
+  let reader = new BrowserMultiFormatReader();
 
-  const startCamera = async () => {
-    try {
-      reader = new BrowserMultiFormatReader();
+  scanningLockRef.current = false;
 
-      // ✅ starta kamera (mobilkompatibel)
-      stream = await navigator.mediaDevices.getUserMedia({
-        video: { facingMode: "environment" },
-      });
+  reader.decodeFromVideoDevice(
+    null,
+    videoRef.current,
+    (result, err) => {
+      if (!result) return;
+      if (scanningLockRef.current) return;
 
-      if (!videoRef.current) return;
+      scanningLockRef.current = true;
 
-      videoRef.current.srcObject = stream;
-      await videoRef.current.play();
+      const text = result.getText().replace(/\s/g, "").toLowerCase();
 
-      // ✅ korrekt metod för mobil
-      reader.decodeFromVideoDevice(
-        null,
-        videoRef.current,
-        (result, err) => {
+      if (!text.startsWith("gear:")) {
+        scanningLockRef.current = false;
+        return;
+      }
 
-          if (!result) return;
-          if (scanningLockRef.current) return;
+      const raw = text.replace("gear:", "");
 
-          const textClean = result.getText().replace(/\s/g, "").toLowerCase();
-
-          if (!textClean.startsWith("gear:")) return;
-
-          scanningLockRef.current = true;
-
-          const raw = textClean.replace("gear:", "");
-
-          // ✅ EXAKT MATCH först
-          let found = items.find(
-            (x) =>
-              `${x.kind}|${x.size || ""}`.toLowerCase() === raw
-          );
-
-          // ✅ fallback om något är konstigt (säkerhet)
-          if (!found) {
-            const [kindRaw, sizeRaw] = raw.split("|");
-
-            found = items.find(
-              (x) =>
-                x.kind.toLowerCase() === (kindRaw || "") &&
-                (x.size || "") === (sizeRaw || "")
-            );
-          }
-
-          if (found) {
-
-            // ✅ haptic feedback (nice UX)
-            navigator.vibrate?.(50);
-
-            setScannedItem(found);
-            setScanOpen(false);
-
-          } else {
-            alert(`Ingen match hittades för: ${raw}`);
-            scanningLockRef.current = false;
-          }
-
-          if (err && err.name !== "NotFoundException") {
-            console.warn(err);
-          }
-        }
+      const found = items.find(
+        (x) =>
+          `${x.kind}|${x.size || ""}`.toLowerCase() === raw
       );
 
-    } catch (err) {
-      console.error("Camera error:", err);
-      alert("Kameran kunde inte startas");
-      setScanOpen(false);
-    }
-  };
+      if (found) {
+        navigator.vibrate?.(50);
 
-  startCamera();
+        setScannedItem(found);
+        setScanOpen(false);
+      } else {
+        alert(`Ingen match: ${raw}`);
+        scanningLockRef.current = false;
+      }
+    }
+  );
 
   return () => {
-    if (stream) {
-      stream.getTracks().forEach((t) => t.stop());
-    }
+    reader.reset?.(); // ✅ rätt sätt att stoppa
     scanningLockRef.current = false;
   };
 }, [scanOpen, items]);
+
 
 const exportQrPdf = async () => {
   const doc = new jsPDF("p", "mm", "a4");
