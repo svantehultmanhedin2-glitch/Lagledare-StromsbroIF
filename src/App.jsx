@@ -2242,7 +2242,6 @@ useEffect(() => {
     try {
       reader = new BrowserMultiFormatReader();
 
-      // ✅ viktig för mobil
       stream = await navigator.mediaDevices.getUserMedia({
         video: { facingMode: "environment" },
       });
@@ -2250,28 +2249,41 @@ useEffect(() => {
       if (!videoRef.current) return;
 
       videoRef.current.srcObject = stream;
-
       await videoRef.current.play();
 
-      reader.decodeFromVideoElement(videoRef.current, (result, err) => {
-        if (result) {
-          const text = result.getText();
+      // ✅ NY METOD (FUNGERAR PÅ MOBIL)
+      reader.decodeFromVideoDevice(
+        null,
+        videoRef.current,
+        (result, err) => {
+          if (result) {
 
-          if (text.startsWith("gear:")) {
-            const key = text.replace("gear:", "");
+            const text = result.getText();
+            console.log("SCAN:", text); // ✅ DEBUG
 
-            const found = items.find(
-              (x) =>
-                `${x.kind}|${x.size || ""}` === key
-            );
+            if (text.startsWith("gear:")) {
+              const key = text.replace("gear:", "");
 
-            if (found) {
-              setScannedItem(found);
-              setScanOpen(false);
+              const found = items.find(
+                (x) =>
+                  `${x.kind}|${x.size || ""}` === key
+              );
+
+              if (found) {
+                setScannedItem(found);
+                setScanOpen(false);
+              } else {
+                console.warn("QR hittades men inget item matchade:", key);
+              }
             }
           }
+
+          // 🔍 DEBUG (kan tas bort sen)
+          if (err && !(err.name === "NotFoundException")) {
+            console.warn(err);
+          }
         }
-      });
+      );
 
     } catch (err) {
       console.error("Camera error:", err);
@@ -2288,6 +2300,7 @@ useEffect(() => {
     }
   };
 }, [scanOpen, items]);
+
 
 const exportQrPdf = async () => {
   const doc = new jsPDF("p", "mm", "a4");
