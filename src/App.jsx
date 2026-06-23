@@ -2296,6 +2296,8 @@ useEffect(() => {
               videoRef.current.srcObject.getTracks().forEach((t) => t.stop());
             }
 
+  scanningLockRef.current = false; // ✅ viktigt
+
             // ✅ haptic feedback (nice UX)
             navigator.vibrate?.(50);
 
@@ -2757,7 +2759,12 @@ const gearKinds = useMemo(() => {
     {isAdmin && (
     <button
       className="btn btn--ghost"
-      onClick={() => setScanOpen(true)}
+      
+  onClick={() => {
+    scanningLockRef.current = false; // ✅ KRITISKT
+    setScanOpen(true);
+  }}
+
     >
       📷 Skanna
     </button>
