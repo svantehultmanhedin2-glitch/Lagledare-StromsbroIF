@@ -2182,6 +2182,8 @@ const [scannedItem, setScannedItem] = useState(null);
 const videoRef = useRef(null);
 const codeReaderRef = useRef(null);
 
+const scanningLockRef = useRef(false);
+
   // formulär
   const [kind, setKind] = useState("");
   const [size, setSize] = useState("");
@@ -2256,61 +2258,64 @@ useEffect(() => {
         null,
         videoRef.current,
         (result, err) => {
-          if (result) {
 
-            const text = result.getText();
-            console.log("SCAN:", text); // ✅ DEBUG
+  if (!result || scanningLockRef.current) return;
 
-            if (text.startsWith("gear:")) {
-              const raw = text.replace("gear:", "").toLowerCase().trim();
+  scanningLockRef.current = true;
 
-// ✅ försök split-format först (rätt format)
-let found = items.find(
-  (x) => `${x.kind}|${x.size || ""}` === raw
-);
+  const text = result.getText();
+  console.log("SCAN:", text);
 
-// ✅ fallback: hantera "vest4" → kind="vest/vests", size="4"
-if (!found) {
-  const match = raw.match(/^([a-z]+)(\d+)?$/);
+  if (!text.startsWith("gear:")) return;
 
-  if (match) {
-    const [, kindRaw, sizeRaw] = match;
+  const raw = text.replace("gear:", "").toLowerCase().trim();
 
-    found = items.find((x) => {
-      const kindMatch =
-        x.kind === kindRaw ||
-        x.kind === `${kindRaw}s`; // hantera vest → vests
+  // ✅ 1. exakt match
+  let found = items.find(
+    (x) => `${x.kind}|${x.size || ""}` === raw
+  );
 
-      const sizeMatch =
-        !sizeRaw || (x.size || "") === sizeRaw;
+  // ✅ 2. fallback (t.ex. vest4)
+  if (!found) {
+    const match = raw.match(/^([a-z]+)(\d+)?$/);
 
-      return kindMatch && sizeMatch;
-    });
+    if (match) {
+      const [, kindRaw, sizeRaw] = match;
+
+      found = items.find((x) => {
+        const kindMatch =
+          x.kind === kindRaw ||
+          x.kind === `${kindRaw}s`;
+
+        const sizeMatch =
+          !sizeRaw || (x.size || "") === sizeRaw;
+
+        return kindMatch && sizeMatch;
+      });
+    }
+  }
+
+  // ✅ ✅ ENDA stället vi hanterar resultat
+  if (found) {
+
+    // stoppa scan direkt
+    if (videoRef.current?.srcObject) {
+      videoRef.current.srcObject.getTracks().forEach(t => t.stop());
+    }
+
+    setScannedItem(found);
+    setScanOpen(false);
+
+  } else {
+    console.warn("Ingen match hittades:", raw);
+    scanningLockRef.current = false; // släpp lås
+  }
+
+  if (err && err.name !== "NotFoundException") {
+    console.warn(err);
   }
 }
-
-if (found) {
-  setScannedItem(found);
-  setScanOpen(false);
-} else {
-  alert("QR hittades men matchar inget material");
-}
-
-              if (found) {
-                setScannedItem(found);
-                setScanOpen(false);
-              } else {
-                console.warn("QR hittades men inget item matchade:", key);
-              }
-            }
-          }
-
-          // 🔍 DEBUG (kan tas bort sen)
-          if (err && !(err.name === "NotFoundException")) {
-            console.warn(err);
-          }
-        }
-      );
+     );
 
     } catch (err) {
       console.error("Camera error:", err);
@@ -2383,6 +2388,22 @@ const exportQrPdf = async () => {
   }
 
   doc.save("qr-etiketter-40x40.pdf");
+};
+
+const adjustStockFromScan = async (kind, size, delta) => {
+  const next = [...items];
+
+  const target = next.find(
+    (x) => x.kind === kind && (x.size || "") === (size || "")
+  );
+
+  if (!target) return;
+
+  target.qty = Math.max(0, (Number(target.qty) || 0) + delta);
+
+  const cleaned = next.filter((x) => (Number(x.qty) || 0) > 0);
+
+  await persistItems(cleaned);
 };
 
   /* ===== LABELS ===== */
@@ -3119,22 +3140,22 @@ const gearKinds = useMemo(() => {
       <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
 
         <button
-          className="btn"
-          onClick={() =>
-            updateGroupedQty(scannedItem.kind, scannedItem.size, -1)
-          }
-        >
-          ➖
-        </button>
+  className="btn"
+  onClick={() =>
+    adjustStockFromScan(scannedItem.kind, scannedItem.size, -1)
+  }
+>
+  ➖
+</button>
 
-        <button
-          className="btn"
-          onClick={() =>
-            updateGroupedQty(scannedItem.kind, scannedItem.size, +1)
-          }
-        >
-          ➕
-        </button>
+<button
+  className="btn"
+  onClick={() =>
+    adjustStockFromScan(scannedItem.kind, scannedItem.size, +1)
+  }
+>
+  ➕
+</button>
 
       </div>
 
@@ -3156,7 +3177,10 @@ const gearKinds = useMemo(() => {
       <button
         className="btn btn--ghost"
         style={{ marginTop: 8 }}
-        onClick={() => setScannedItem(null)}
+        onClick={() => {
+  setScannedItem(null);
+  scanningLockRef.current = false;
+}}
       >
         Stäng
       </button>
