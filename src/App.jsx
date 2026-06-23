@@ -2262,12 +2262,39 @@ useEffect(() => {
             console.log("SCAN:", text); // ✅ DEBUG
 
             if (text.startsWith("gear:")) {
-              const key = text.replace("gear:", "");
+              const raw = text.replace("gear:", "").toLowerCase().trim();
 
-              const found = items.find(
-                (x) =>
-                  `${x.kind}|${x.size || ""}` === key
-              );
+// ✅ försök split-format först (rätt format)
+let found = items.find(
+  (x) => `${x.kind}|${x.size || ""}` === raw
+);
+
+// ✅ fallback: hantera "vest4" → kind="vest/vests", size="4"
+if (!found) {
+  const match = raw.match(/^([a-z]+)(\d+)?$/);
+
+  if (match) {
+    const [, kindRaw, sizeRaw] = match;
+
+    found = items.find((x) => {
+      const kindMatch =
+        x.kind === kindRaw ||
+        x.kind === `${kindRaw}s`; // hantera vest → vests
+
+      const sizeMatch =
+        !sizeRaw || (x.size || "") === sizeRaw;
+
+      return kindMatch && sizeMatch;
+    });
+  }
+}
+
+if (found) {
+  setScannedItem(found);
+  setScanOpen(false);
+} else {
+  alert("QR hittades men matchar inget material");
+}
 
               if (found) {
                 setScannedItem(found);
