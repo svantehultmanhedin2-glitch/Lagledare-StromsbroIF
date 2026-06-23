@@ -2220,7 +2220,8 @@ const [assignInlineTeam, setAssignInlineTeam] = useState(teamId);
 
         if (!alive) return;
 
-        setItems(normalizeSportsGearList(stockData));
+
+setItems(normalizeSportsGearList(stockData || []));
         setSportsGearStock(Array.isArray(stockData) ? stockData : []);
         setTeamGear(Array.isArray(teamData) ? teamData : []);
       } catch (e) {
@@ -2478,7 +2479,7 @@ const adjustStockFromScan = async (kind, size, delta) => {
   /* ===== TEAM GROUP ===== */
   const groupedTeamGear = useMemo(() => {
     const map = {};
-    teamGear.forEach((g) => {
+    (teamGear || []).forEach((g) => {
       const key = `${g.kind}|${g.size || ""}`;
       if (!map[key]) map[key] = { ...g, qty: 0 };
       map[key].qty += Number(g.qty || 0);
@@ -2494,7 +2495,7 @@ const adjustStockFromScan = async (kind, size, delta) => {
 const gearKinds = useMemo(() => {
   return [
     "all",
-    ...new Set(items.map((i) => i.kind)),
+    ...new Set((items || []).map((i) => i.kind)),
   ].sort((a, b) => a.localeCompare(b, "sv"));
 }, [items]);
 
@@ -2622,7 +2623,7 @@ const gearKinds = useMemo(() => {
     )}
 
     
-{groupedTeamGear
+{(groupedTeamGear || [])
   .filter((g) => filterKind === "all" || g.kind === filterKind)
   .map(
 (g) => (
@@ -3439,7 +3440,7 @@ const updateItem = async (id, patch) => {
     return;
   }
 
-  const next = items.map((i) =>
+  const next = (items || []).map((i) =>
     i.id === id ? { ...i, ...patch } : i
   );
 
