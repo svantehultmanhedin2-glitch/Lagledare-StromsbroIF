@@ -2238,51 +2238,78 @@ const [assignInlineTeam, setAssignInlineTeam] = useState(teamId);
 useEffect(() => {
   if (!scanOpen) return;
 
-  let reader = new BrowserMultiFormatReader();
+  // ✅ stoppa eventuell tidigare instans
+  if (codeReaderRef.current) {
+    try {
+      codeReaderRef.current.reset();
+    } catch {}
+  }
+
+  const reader = new BrowserMultiFormatReader();
+  codeReaderRef.current = reader;
 
   scanningLockRef.current = false;
 
-  reader.decodeFromVideoDevice(
-    null,
-    videoRef.current,
-    (result, err) => {
-      if (!result) return;
-      if (scanningLockRef.current) return;
+  let cancelled = false;
 
-      scanningLockRef.current = true;
+  const start = async () => {
+    try {
+      await reader.decodeFromVideoDevice(
+        null,
+        videoRef.current,
+        (result, err) => {
 
-      const text = result.getText().replace(/\s/g, "").toLowerCase();
+          if (cancelled) return;
+          if (!result) return;
+          if (scanningLockRef.current) return;
 
-      if (!text.startsWith("gear:")) {
-        scanningLockRef.current = false;
-        return;
-      }
+          scanningLockRef.current = true;
 
-      const raw = text.replace("gear:", "");
+          const text = result.getText().replace(/\s/g, "").toLowerCase();
 
-      const found = items.find(
-        (x) =>
-          `${x.kind}|${x.size || ""}`.toLowerCase() === raw
+          if (!text.startsWith("gear:")) {
+            scanningLockRef.current = false;
+            return;
+          }
+
+          const raw = text.replace("gear:", "");
+
+          const found = items.find(
+            (x) =>
+              `${x.kind}|${x.size || ""}`.toLowerCase() === raw
+          );
+
+          if (found) {
+            navigator.vibrate?.(50);
+
+            setScannedItem(found);
+            setScanOpen(false);
+
+          } else {
+            alert(`Ingen match: ${raw}`);
+            scanningLockRef.current = false;
+          }
+        }
       );
 
-      if (found) {
-        navigator.vibrate?.(50);
-
-        setScannedItem(found);
-        setScanOpen(false);
-      } else {
-        alert(`Ingen match: ${raw}`);
-        scanningLockRef.current = false;
-      }
+    } catch (err) {
+      console.error("Camera error:", err);
+      setScanOpen(false);
     }
-  );
+  };
+
+  start();
 
   return () => {
-    reader.reset?.(); // ✅ rätt sätt att stoppa
+    cancelled = true;
+
+    try {
+      reader.reset();
+    } catch {}
+
     scanningLockRef.current = false;
   };
-}, [scanOpen, items]);
-
+}, [scanOpen]);
 
 const exportQrPdf = async () => {
   const doc = new jsPDF("p", "mm", "a4");
