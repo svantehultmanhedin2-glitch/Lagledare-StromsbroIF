@@ -2167,7 +2167,8 @@ const stickyWrapStyle = {
 
 /* ================= Page: Sports Gear ================= */
 
-function SportsGearPage({ user, teamId, teamsVisible }) {  const isAdmin = user.role === "admin";
+function SportsGearPage({ user, teamId }) {
+  const isAdmin = user.role === "admin";
 
   const [showForm, setShowForm] = useState(false);
   const [items, setItems] = useState([]);
@@ -2182,8 +2183,6 @@ const videoRef = useRef(null);
 const codeReaderRef = useRef(null);
 
 const scanningLockRef = useRef(false);
-const [assignInlineQty, setAssignInlineQty] = useState("");
-const [assignInlineTeam, setAssignInlineTeam] = useState(teamId);
 
   // formulär
   const [kind, setKind] = useState("");
@@ -2384,45 +2383,6 @@ const exportQrPdf = async () => {
   }
 
   doc.save("qr-etiketter-40x40.pdf");
-};
-
-const assignFromScan = async () => {
-  const qty = Math.max(0, Number(assignInlineQty) || 0);
-
-  if (!scannedItem || qty <= 0) {
-    alert("Ange antal");
-    return;
-  }
-
-  try {
-    const next = [...teamGear];
-
-    const existing = next.find(
-      (x) =>
-        x.kind === scannedItem.kind &&
-        (x.size || "") === (scannedItem.size || "")
-    );
-
-    if (existing) {
-      existing.qty += qty;
-    } else {
-      next.push({
-        kind: scannedItem.kind,
-        size: scannedItem.size || "",
-        qty,
-      });
-    }
-
-    const res = await assignSportsGearToTeam(assignInlineTeam, next);
-
-    setTeamGear(res.teamGear);
-    setSportsGearStock(res.stock);
-
-    setScannedItem(null);
-    setAssignInlineQty("");
-  } catch (err) {
-    alert(err.message);
-  }
 };
 
 const adjustStockFromScan = async (kind, size, delta) => {
@@ -3080,6 +3040,8 @@ const gearKinds = useMemo(() => {
                         >
                           🗑️
                         </button>
+
+                        <QRCode value={`gear:${g.kind}|${g.size || ""}`} size={64} />
                       </>
                     )}
                   </div>
@@ -3193,46 +3155,19 @@ const gearKinds = useMemo(() => {
       </div>
 
       {isAdmin && (
-  <div style={{ marginTop: 12 }}>
-
-    <div className="formGrid">
-
-      <div className="field">
-        <span>Lag</span>
-<select
-  value={assignInlineTeam}
-  onChange={(e) => setAssignInlineTeam(e.target.value)}
->
-  {teamsVisible.map((t) => (
-    <option key={t.id} value={t.id}>
-      {t.name}
-    </option>
-  ))}
-</select>
-      </div>
-
-      <div className="field">
-        <span>Antal</span>
-        <input
-          value={assignInlineQty}
-          onChange={(e) => setAssignInlineQty(e.target.value)}
-          inputMode="numeric"
-          placeholder="t.ex. 5"
-        />
-      </div>
-
-    </div>
-
-    <button
-      className="btn btn--ok"
-      style={{ marginTop: 10 }}
-      onClick={assignFromScan}
-    >
-      Tilldela
-    </button>
-
-  </div>
-)}
+        <button
+          className="btn btn--ok"
+          style={{ marginTop: 10 }}
+          onClick={() => {
+            setSelectedGearKind(scannedItem.kind);
+            setSelectedGearSize(scannedItem.size);
+            setAssignGearOpen(true);
+            setScannedItem(null);
+          }}
+        >
+          Tilldela
+        </button>
+      )}
 
       <button
         className="btn btn--ghost"
