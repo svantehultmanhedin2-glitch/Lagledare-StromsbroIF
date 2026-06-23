@@ -2235,42 +2235,56 @@ const codeReaderRef = useRef(null);
 useEffect(() => {
   if (!scanOpen) return;
 
-  let active = true;
-  const reader = new BrowserMultiFormatReader();
+  let stream = null;
+  let reader;
 
-  codeReaderRef.current = reader;
+  const startCamera = async () => {
+    try {
+      reader = new BrowserMultiFormatReader();
 
-  reader.decodeFromVideoDevice(
-    null,
-    videoRef.current,
-    (result, err) => {
-      if (!active) return;
+      // ✅ viktig för mobil
+      stream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: "environment" },
+      });
 
-      if (result) {
-        const text = result.getText();
+      if (!videoRef.current) return;
 
-        if (text.startsWith("gear:")) {
-          const key = text.replace("gear:", "");
+      videoRef.current.srcObject = stream;
 
-          const found = items.find(
-            (x) =>
-              `${x.kind}|${x.size || ""}` === key
-          );
+      await videoRef.current.play();
 
-          if (found) {
-            setScannedItem(found);
-            setScanOpen(false);
+      reader.decodeFromVideoElement(videoRef.current, (result, err) => {
+        if (result) {
+          const text = result.getText();
+
+          if (text.startsWith("gear:")) {
+            const key = text.replace("gear:", "");
+
+            const found = items.find(
+              (x) =>
+                `${x.kind}|${x.size || ""}` === key
+            );
+
+            if (found) {
+              setScannedItem(found);
+              setScanOpen(false);
+            }
           }
         }
-      }
+      });
+
+    } catch (err) {
+      console.error("Camera error:", err);
+      alert("Kameran kunde inte startas");
+      setScanOpen(false);
     }
-  );
+  };
+
+  startCamera();
 
   return () => {
-    active = false;
-
-    if (reader) {
-      reader.stopContinuousDecode?.();
+    if (stream) {
+      stream.getTracks().forEach((t) => t.stop());
     }
   };
 }, [scanOpen, items]);
@@ -2652,7 +2666,7 @@ const gearKinds = useMemo(() => {
       📷 Skanna
     </button>
     )}
-    
+
     {/* Exportera */}
     {isAdmin && (
       <button
@@ -2921,24 +2935,7 @@ const gearKinds = useMemo(() => {
   )}
 </div>
 
-{scanOpen && (
-  <div className="card" style={{ marginTop: 12 }}>
-    <div className="card__title">Skanna QR</div>
 
-    <video
-      ref={videoRef}
-      style={{ width: "100%", borderRadius: 12 }}
-    />
-
-    <button
-      className="btn btn--ghost"
-      onClick={() => setScanOpen(false)}
-      style={{ marginTop: 10 }}
-    >
-      Stäng
-    </button>
-  </div>
-)}
 
                   {/* Actions */}
                   <div
@@ -2998,6 +2995,136 @@ const gearKinds = useMemo(() => {
           })}
         </div>
       </div>
+
+      {/* ✅ SCANNER DIALOG */}
+{scanOpen && (
+  <div
+    style={{
+      position: "fixed",
+      inset: 0,
+      background: "rgba(0,0,0,0.8)",
+      zIndex: 1000,
+      display: "flex",
+      justifyContent: "center",
+      alignItems: "center",
+      padding: 16,
+    }}
+  >
+    <div
+      style={{
+        background: "#111",
+        borderRadius: 16,
+        padding: 12,
+        width: "100%",
+        maxWidth: 420,
+      }}
+    >
+      <div style={{ marginBottom: 8 }}>
+        <strong>📷 Skanna QR</strong>
+      </div>
+
+      <video
+        ref={videoRef}
+        autoPlay
+        playsInline
+        muted
+        style={{
+          width: "100%",
+          borderRadius: 12,
+        }}
+      />
+
+      <button
+        className="btn btn--ghost"
+        style={{ marginTop: 10 }}
+        onClick={() => setScanOpen(false)}
+      >
+        Stäng
+      </button>
+    </div>
+  </div>
+)}
+
+{/* ✅ RESULT */}
+{scannedItem && (
+  <div
+    style={{
+      position: "fixed",
+      inset: 0,
+      background: "rgba(0,0,0,0.8)",
+      zIndex: 1000,
+      display: "flex",
+      justifyContent: "center",
+      alignItems: "center",
+      padding: 16,
+    }}
+  >
+    <div
+      style={{
+        background: "#111",
+        borderRadius: 16,
+        padding: 16,
+        width: "100%",
+        maxWidth: 420,
+      }}
+    >
+      <div className="card__title">
+        {gearLabels[scannedItem.kind]} {scannedItem.size}
+      </div>
+
+      <div style={{ marginTop: 8 }}>
+        Lager: <strong>{scannedItem.qty}</strong>
+      </div>
+
+      <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
+
+        <button
+          className="btn"
+          onClick={() =>
+            updateGroupedQty(scannedItem.kind, scannedItem.size, -1)
+          }
+        >
+          ➖
+        </button>
+
+        <button
+          className="btn"
+          onClick={() =>
+            updateGroupedQty(scannedItem.kind, scannedItem.size, +1)
+          }
+        >
+          ➕
+        </button>
+
+      </div>
+
+      {isAdmin && (
+        <button
+          className="btn btn--ok"
+          style={{ marginTop: 10 }}
+          onClick={() => {
+            setSelectedGearKind(scannedItem.kind);
+            setSelectedGearSize(scannedItem.size);
+            setAssignGearOpen(true);
+            setScannedItem(null);
+          }}
+        >
+          Tilldela
+        </button>
+      )}
+
+      <button
+        className="btn btn--ghost"
+        style={{ marginTop: 8 }}
+        onClick={() => setScannedItem(null)}
+      >
+        Stäng
+      </button>
+    </div>
+  </div>
+)}
+
+
     </div>
   );
 }
