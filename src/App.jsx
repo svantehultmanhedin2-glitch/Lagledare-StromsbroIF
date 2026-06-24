@@ -2353,13 +2353,23 @@ const stickyWrapStyle = {
 
       <button
         style={{ marginTop: 10 }}
-        onClick={() => setScanOpen(false)}
+        
+onClick={() => {
+  try {
+    codeReaderRef.current?.reset();
+  } catch {}
+
+  scanningLockRef.current = false;
+  setScanOpen(false);
+}}
+
       >
         Stäng
       </button>
     </div>
   </div>
 )}
+
 
 {scannedItem && (
   <div
@@ -2389,12 +2399,29 @@ const stickyWrapStyle = {
 
       <div>lager: {scannedItem.qty}</div>
 
-      {/* dina knappar */}
 
-      <button onClick={() => setScannedItem(null)}>Stäng</button>
+      <div style={{ marginTop: 10, display: "flex", gap: 6 }}>
+        <button onClick={() => adjustWarehouseStock(scannedItem.kind, scannedItem.size, -10)}>−10</button>
+        <button onClick={() => adjustWarehouseStock(scannedItem.kind, scannedItem.size, -1)}>−1</button>
+        <button onClick={() => adjustWarehouseStock(scannedItem.kind, scannedItem.size, +1)}>+1</button>
+        <button onClick={() => adjustWarehouseStock(scannedItem.kind, scannedItem.size, +10)}>+10</button>
+      </div>
+
+
+      <button 
+onClick={() => {
+  try {
+    codeReaderRef.current?.reset();
+  } catch {}
+
+  scanningLockRef.current = false;
+  setScannedItem(null);
+}}
+>Stäng</button>
     </div>
   </div>
 )}
+
 
     </div>
     
