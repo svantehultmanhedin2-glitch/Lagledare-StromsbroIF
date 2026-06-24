@@ -3375,8 +3375,7 @@ const gearKinds = useMemo(() => {
                           🗑️
                         </button>
 
-                        <QRCode value={`gear:${g.kind}|${g.size || ""}`} size={64} />
-                      </>
+                                             </>
                     )}
                   </div>
                 </div>
