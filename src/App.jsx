@@ -158,6 +158,22 @@ async function importLeaderClothesExcel(file) {
   return created;
 }
 
+// ===== API: INVENTORY =====
+
+export async function apiLoadInventoryTasks() {
+  const res = await fetch("/api/inventory");
+  return await res.json();
+}
+
+export async function apiSaveInventoryTasks(tasks) {
+  await fetch("/api/inventory", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify({ tasks })
+  });
+}
 
 
 /* ================= Utilities ================= */
@@ -1042,7 +1058,8 @@ function Topbar({ user, teamsVisible, activeTeamId, setActiveTeamId, nav, route,
     );
     navItems.push(
       { path: "/admin", label: "Admin" },
-      { path: "/reports", label: "Rapporter" }
+      { path: "/reports", label: "Rapporter" },
+      { path: "/inventory", label: "Inventering" }
     );
   }
 
@@ -5584,6 +5601,444 @@ const exportTeamExtras = async () => {
     </div>
   );
 }
+
+/* ================= Page: Inventory ================= */
+function InventoryPage({ user }) {
+  const [tasks, setTasks] = useState([]);
+  const [activeTaskId, setActiveTaskId] = useState(null);
+  const [scanOpen, setScanOpen] = useState(false);
+const [lastScanned, setLastScanned] = useState(null);
+
+
+  const videoRef = useRef(null);
+const scanningLockRef = useRef(false);
+
+
+useEffect(() => {
+  const load = async () => {
+    const data = await apiLoadInventoryTasks();
+    console.log("LOADED TASKS:", data);
+    setTasks(data);
+  };
+
+  load();
+}, []);
+
+useEffect(() => {
+  if (!tasks.length) return;
+
+  const active = tasks.find(t => t.status === "active");
+
+  if (active) {
+    setActiveTaskId(active.id);
+  }
+}, [tasks]);
+
+
+useEffect(() => {
+  if (!scanOpen) return;
+
+  let stream = null;
+  let reader;
+
+  const startCamera = async () => {
+    reader = new BrowserMultiFormatReader();
+
+    stream = await navigator.mediaDevices.getUserMedia({
+      video: { facingMode: "environment" }
+    });
+
+    if (!videoRef.current) return;
+
+    videoRef.current.srcObject = stream;
+    await videoRef.current.play();
+
+    reader.decodeFromVideoDevice(
+      null,
+      videoRef.current,
+      (result) => {
+        if (!result) return;
+        if (scanningLockRef.current) return;
+
+        const text = result.getText()
+          .replace(/\s/g, "")
+          .toLowerCase();
+
+        if (!text.startsWith("gear:")) return;
+
+        scanningLockRef.current = true;
+
+        const raw = text.replace("gear:", "");
+        const [kindRaw, sizeRaw] = raw.split("|");
+
+        // ✅ HIT KOMMER MAGIN
+        handleScan(kindRaw, sizeRaw);
+
+        navigator.vibrate?.(50);
+
+        setScanOpen(false);
+      }
+    );
+  };
+
+  startCamera();
+
+  return () => {
+    if (stream) {
+      stream.getTracks().forEach(t => t.stop());
+    }
+    scanningLockRef.current = false;
+  };
+}, [scanOpen]);
+
+  const activeTask = tasks.find(t => t.id === activeTaskId);
+
+  /* ===== CREATE TASK ===== */
+  const createTask = async (mode) => {
+    const sports = await apiLoadSportsGear();
+    const warehouse = await apiLoadWarehouse();
+
+    
+const filteredWarehouse = warehouse.filter(x =>
+  x.type !== "jersey" &&
+  Number(x.qty || 0) >= 0
+);
+
+
+const allItems = [...sports, ...filteredWarehouse];
+
+    const sixMonthsAgo = Date.now() - 1000 * 60 * 60 * 24 * 180;
+
+    const items = allItems
+      .filter(x => {
+        if (mode === "all") return true;
+        return !x.lastInventoryAt || new Date(x.lastInventoryAt).getTime() < sixMonthsAgo;
+      })
+      .map(x => {
+  const kind = String(x.kind || "").trim();
+  const size = String(x.size || "").trim();
+
+  return {
+    key: `${kind}|${size}`,
+    kind,
+    size,
+    expectedQty: Number(x.qty) || 0,
+    countedQty: null,
+    updatedAt: null
+  };
+})
+
+    const newTask = {
+      id: uuid(),
+      createdAt: new Date().toISOString(),
+      status: "active",
+      items
+    };
+
+    const next = [newTask, ...tasks];
+    setTasks(next);
+    setActiveTaskId(newTask.id);
+
+    await apiSaveInventoryTasks(next);
+  };
+
+  /* ===== HANDLE SCAN ===== */
+const handleScan = (kind, size) => {
+  if (!activeTask) return;
+
+  const updatedTask = {
+    ...activeTask,
+    items: activeTask.items.map(i =>
+      normalize(i.kind) === normalize(kind) &&
+      normalize(i.size) === normalize(size)
+        ? {
+            ...i,
+            countedQty: (i.countedQty || 0) + 1,
+            updatedAt: new Date().toISOString()
+          }
+        : i
+    )
+  };
+
+  const next = tasks.map(t =>
+    t.id === updatedTask.id ? updatedTask : t
+  );
+
+  setTasks(next);
+  apiSaveInventoryTasks(next);
+
+  setLastScanned({
+    kind,
+    size,
+    time: new Date().toISOString()
+  });
+};
+
+
+
+const calculateDiff = (task) => {
+  return task.items.map(i => ({
+    ...i,
+    diff: (i.countedQty || 0) - (i.expectedQty || 0)
+  }));
+};
+
+const completeTask = async () => {
+  if (!activeTask) return;
+
+  const itemsWithDiff = calculateDiff(activeTask);
+
+  const summary = itemsWithDiff
+    .filter(i => i.diff !== 0)
+    .map(i =>
+      `${i.kind} ${i.size || ""}: ${i.diff > 0 ? "+" : ""}${i.diff}`
+    )
+    .join("\n");
+
+  const ok = confirm(
+    summary
+      ? `Avvikelse:\n\n${summary}\n\nVill du uppdatera lagret?`
+      : "Ingen differens. Slutföra inventering?"
+  );
+
+  if (!ok) return;
+
+  // ✅ uppdatera lager
+  await applyInventoryAdjustments(itemsWithDiff);
+
+  const doneTask = {
+    ...activeTask,
+    status: "done",
+    completedAt: new Date().toISOString()
+  };
+
+  const next = tasks.map(t =>
+    t.id === activeTask.id ? doneTask : t
+  );
+
+  setTasks(next);
+  setActiveTaskId(null);
+
+  await apiSaveInventoryTasks(next);
+};
+
+const applyInventoryAdjustments = async (itemsWithDiff) => {
+
+  const sports = await apiLoadSportsGear();
+  const warehouse = await apiLoadWarehouse();
+
+  let nextSports = [...sports];
+  let nextWarehouse = [...warehouse];
+
+  itemsWithDiff.forEach(i => {
+    if (i.diff === 0) return;
+
+    const match = (x) =>
+      x.kind === i.kind &&
+      (x.size || "") === (i.size || "");
+
+    // ✅ sportsgear
+    const sportItem = nextSports.find(match);
+    if (sportItem) {
+      sportItem.qty = Math.max(0, (sportItem.qty || 0) + i.diff);
+      sportItem.lastInventoryAt = new Date().toISOString();
+      return;
+    }
+
+    // ✅ warehouse (shorts / socks)
+    const whItem = nextWarehouse.find(match);
+    if (whItem) {
+      whItem.qty = Math.max(0, (whItem.qty || 0) + i.diff);
+      whItem.lastInventoryAt = new Date().toISOString();
+    }
+  });
+
+  await apiSaveSportsGear(nextSports);
+  await apiSaveWarehouse(nextWarehouse);
+};
+
+const isDone = (task) => {
+  if (!task) return false;
+
+  return task.items.every(i => i.countedQty !== null);
+};
+
+  /* ===== UI ===== */
+  return (
+    <div>
+
+      {/* HEADER */}
+      <div className="pageHeader">
+
+        <div className="pageHeader__top">
+          <div className="pageHeader__title">
+            Inventering
+          </div>
+        </div>
+
+        <div className="pageHeader__meta">
+          Skapa och utför inventering av lager
+        </div>
+
+        <div className="pageHeader__actions" style={{ marginTop: 10 }}>
+          <button className="btn btn--ok" onClick={() => createTask("all")}>
+            Inventera allt
+          </button>
+
+          <button className="btn btn--ghost" onClick={() => createTask("missing")}>
+            Ej inventerade 6 mån
+          </button>
+        </div>
+
+      </div>
+
+      {/* AKTIV TASK */}
+      {activeTask && (
+        <div className="card">
+
+          <div className="card__top">
+            <div className="card__title">
+              Pågående inventering
+            </div>
+
+            <button
+              className="btn btn--ghost"
+              onClick={() => setScanOpen(true)}
+            >
+              📷 Skanna
+            </button>
+          </div>
+{lastScanned && (
+  <div
+    style={{
+      marginBottom: 10,
+      padding: 10,
+      borderRadius: 12,
+      background: "rgba(30,91,191,.12)",
+      border: "1px solid rgba(30,91,191,.35)"
+    }}
+  >
+    <strong>Senast scannad:</strong><br />
+
+    {lastScanned.kind} {lastScanned.size || ""}
+
+    <div style={{ fontSize: 12, opacity: 0.7, marginTop: 2 }}>
+      {new Date(lastScanned.time).toLocaleTimeString()}
+    </div>
+  </div>
+)}
+
+          <div className="history" style={{ marginTop: 10 }}>
+
+            {activeTask.items.map(i => (
+              <div
+                key={i.key}
+                className="historyRow"
+                style={{
+                  background: i.countedQty !== null
+                    ? "rgba(30,91,191,.08)"
+                    : "rgba(255,255,255,.03)"
+                }}
+              >
+
+                <div>
+                  <div className="historyRow__title">
+                    {i.kind} {i.size}
+                  </div>
+
+                  <div className="historyRow__sub">
+                    Förväntat: {i.expectedQty}
+                  </div>
+                </div>
+
+                <strong>
+                  {i.countedQty ?? "-"}
+                </strong>
+
+              </div>
+            ))}
+
+          </div>
+
+          {isDone(activeTask) && (
+            <button
+              className="btn btn--ok"
+              style={{ marginTop: 10 }}
+              onClick={completeTask}
+            >
+              ✅ Slutför inventering
+            </button>
+          )}
+
+        </div>
+      )}
+
+      {/* HISTORIK */}
+      <div className="card">
+
+        <div className="card__top">
+          <div className="card__title">Inventerade</div>
+        </div>
+
+        <div className="history" style={{ marginTop: 10 }}>
+
+          {tasks.filter(t => t.status === "done").map(t => (
+            <div key={t.id} className="historyRow">
+
+              <div>
+                <div className="historyRow__title">
+                  Inventering
+                </div>
+
+                <div className="historyRow__sub">
+                  {new Date(t.completedAt).toLocaleString()}
+                </div>
+              </div>
+
+              <span className="pill pill--ok">
+                Klar
+              </span>
+
+            </div>
+          ))}
+
+        </div>
+
+      </div>
+
+      {/* SCANNER DIALOG */}
+      {scanOpen && (
+        <div className="modalOverlay">
+
+          <div className="modalSheet">
+
+            <div className="modalHeader">
+              <div className="modalTitle">📷 Skanna</div>
+              <button className="iconBtn" onClick={() => setScanOpen(false)}>✖️</button>
+            </div>
+
+            <div className="modalBody">
+              
+              <video
+                ref={videoRef}
+                autoPlay
+                playsInline
+                muted
+                style={{ width: "100%", borderRadius: 12 }}
+              />
+
+            </div>
+
+          </div>
+
+        </div>
+      )}
+
+    </div>
+  );
+}
+
+
 /* ================= App root ================= */
 function AuthedApp({ auth, route, nav }) {
   const { visibleTeams, activeTeamId, setActiveTeamId } = useTeams(auth.user);
@@ -5630,6 +6085,11 @@ if (route === "/matchkit")
           teamId={activeTeamId}
           teamsAll={DEFAULT_TEAMS}
         />
+      );
+
+      if (route === "/inventory")
+      return (
+       <InventoryPage user={auth.user} teamId={activeTeamId} />
       );
 
     return (
