@@ -2556,16 +2556,13 @@ const exportQrPdf = async () => {
 
   const labelSize = 40;
 
-  // ✅ EXAKT dina uppmätta marginaler
   const marginX = 15.45;
   const marginY = 13.55;
-
-  // ✅ EXAKT mellanrum
   const gap = 5.85;
 
   const qrSize = 30;
 
-  let index = 0;
+  const perPage = cols * rows; // 24 etiketter per sida
 
   const list = items
     .slice()
@@ -2573,42 +2570,43 @@ const exportQrPdf = async () => {
       (a.kind + a.size).localeCompare(b.kind + b.size, "sv")
     );
 
-  for (let r = 0; r < rows; r++) {
-    for (let c = 0; c < cols; c++) {
+  for (let i = 0; i < list.length; i++) {
 
-      if (index >= list.length) break;
-
-      const g = list[index];
-
-      const value = `gear:${g.kind}|${g.size || ""}`;
-      const qrDataUrl = await QRCodeLib.toDataURL(value);
-
-      // ✅ RÄTT POSITION
-      const x = marginX + c * (labelSize + gap);
-      const y = marginY + r * (labelSize + gap);
-
-      // ✅ centrera QR
-      const qrX = x + (labelSize - qrSize) / 2;
-      const qrY = y + 4;
-
-      doc.addImage(qrDataUrl, "PNG", qrX, qrY, qrSize, qrSize);
-
-      // ✅ text
-      doc.setFontSize(7);
-
-      const label = `${gearLabels[g.kind] || g.kind}${
-        g.size ? " " + g.size : ""
-      }`;
-
-      doc.text(
-        label,
-        x + labelSize / 2,
-        y + labelSize - 3,
-        { align: "center" }
-      );
-
-      index++;
+    // ✅ ny sida när 24 är fyllda
+    if (i > 0 && i % perPage === 0) {
+      doc.addPage();
     }
+
+    const pageIndex = i % perPage;
+
+    const r = Math.floor(pageIndex / cols);
+    const c = pageIndex % cols;
+
+    const g = list[i];
+
+    const value = `gear:${g.kind}|${g.size || ""}`;
+    const qrDataUrl = await QRCodeLib.toDataURL(value);
+
+    const x = marginX + c * (labelSize + gap);
+    const y = marginY + r * (labelSize + gap);
+
+    const qrX = x + (labelSize - qrSize) / 2;
+    const qrY = y + 4;
+
+    doc.addImage(qrDataUrl, "PNG", qrX, qrY, qrSize, qrSize);
+
+    doc.setFontSize(7);
+
+    const label = `${gearLabels[g.kind] || g.kind}${
+      g.size ? " " + g.size : ""
+    }`;
+
+    doc.text(
+      label,
+      x + labelSize / 2,
+      y + labelSize - 3,
+      { align: "center" }
+    );
   }
 
   doc.save("qr-sportsgear-etiketter.pdf");
