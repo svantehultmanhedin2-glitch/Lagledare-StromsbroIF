@@ -1620,30 +1620,6 @@ const stickyWrapStyle = {
   zIndex: 30,
 };
 
-{isMobile && (
-  <div
-    className="card"
-    style={{
-      marginBottom: 10,
-      padding: 10,
-      display: "flex",
-      justifyContent: "space-between",
-      alignItems: "center",
-    }}
-  >
-    <div style={{ fontWeight: 600 }}>
-      Verktyg
-    </div>
-
-    <button
-      className="btn btn--ghost"
-      onClick={() => setShowToolsMobile((p) => !p)}
-    >
-      {showToolsMobile ? "▲" : "▼"}
-    </button>
-  </div>
-)}
-
   const glassCardStyle = {
     background: "rgba(15,23,42,0.88)",
     backdropFilter: "blur(10px)",
@@ -1659,17 +1635,19 @@ const stickyWrapStyle = {
 <div style={stickyWrapStyle}>
 
   {/* ✅ MOBIL TOGGLE */}
-  {isMobile && (
-    <div className="card" style={{ marginBottom: 10, padding: 10 }}>
-      <button
-        className="btn btn--ghost"
-        onClick={() => setShowToolsMobile((p) => !p)}
-        style={{ width: "100%" }}
-      >
-        {showToolsMobile ? "Dölj verktyg ▲" : "Visa verktyg ▼"}
-      </button>
-    </div>
-  )}
+  
+{isMobile && (
+  <div className="card" style={{ marginBottom: 10, padding: 10 }}>
+    <button
+      className="btn btn--ghost"
+      onClick={() => setShowToolsMobile((p) => !p)}
+      style={{ width: "100%" }}
+    >
+      {showToolsMobile ? "Dölj verktyg ▲" : "Visa verktyg ▼"}
+    </button>
+  </div>
+)}
+
 
   {/* ✅ ALLA TOOLCARDS WRAPPADE I EN */}
   {(!isMobile || showToolsMobile) && (
@@ -2336,45 +2314,84 @@ const stickyWrapStyle = {
         ))}
       </div>
 
-      {scanOpen && (
-  <div className="overlay">
-    <div className="card">
-      <div className="card__title">📷 Skanna</div>
+{scanOpen && (
+  <div
+    style={{
+      position: "fixed",
+      inset: 0,
+      background: "rgba(0,0,0,0.8)",
+      zIndex: 9999,
+      display: "flex",
+      justifyContent: "center",
+      alignItems: "center",
+      padding: 16,
+    }}
+  >
+    <div
+      style={{
+        background: "#111",
+        borderRadius: 16,
+        padding: 12,
+        width: "100%",
+        maxWidth: 420,
+      }}
+    >
+      <div style={{ marginBottom: 8 }}>
+        <strong>📷 Skanna</strong>
+      </div>
 
       <video
         ref={videoRef}
         autoPlay
         playsInline
         muted
-        style={{ width: "100%", borderRadius: 12 }}
+        style={{
+          width: "100%",
+          borderRadius: 12,
+        }}
       />
 
-      <button onClick={() => setScanOpen(false)}>Stäng</button>
+      <button
+        style={{ marginTop: 10 }}
+        onClick={() => setScanOpen(false)}
+      >
+        Stäng
+      </button>
     </div>
   </div>
 )}
 
 {scannedItem && (
-  <div className="overlay">
-    <div className="card">
-
-      <div className="card__title">
+  <div
+    style={{
+      position: "fixed",
+      inset: 0,
+      background: "rgba(0,0,0,0.8)",
+      zIndex: 9999,
+      display: "flex",
+      justifyContent: "center",
+      alignItems: "center",
+      padding: 16,
+    }}
+  >
+    <div
+      style={{
+        background: "#111",
+        borderRadius: 16,
+        padding: 16,
+        width: "100%",
+        maxWidth: 420,
+      }}
+    >
+      <div>
         {scannedItem.kind} {scannedItem.size}
       </div>
 
-      <div style={{ marginTop: 6 }}>
-        Lager: <strong>{scannedItem.qty}</strong>
-      </div>
+      <div>lager: {scannedItem.qty}</div>
 
-      <div style={{ marginTop: 10, display: "flex", gap: 6 }}>
-        <button onClick={() => adjustWarehouseStock(scannedItem.kind, scannedItem.size, -10)}>−10</button>
-        <button onClick={() => adjustWarehouseStock(scannedItem.kind, scannedItem.size, -1)}>−1</button>
-        <button onClick={() => adjustWarehouseStock(scannedItem.kind, scannedItem.size, +1)}>+1</button>
-        <button onClick={() => adjustWarehouseStock(scannedItem.kind, scannedItem.size, +10)}>+10</button>
-      </div>
+      {/* dina knappar */}
 
       <button onClick={() => setScannedItem(null)}>Stäng</button>
-
     </div>
   </div>
 )}
