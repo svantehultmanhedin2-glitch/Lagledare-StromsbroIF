@@ -2487,19 +2487,21 @@ function SportsGearPage({ user, teamId }) {
 
   const [showForm, setShowForm] = useState(false);
   const [items, setItems] = useState([]);
-
+  const [teamSectionOpen, setTeamSectionOpen] = useState(false);
   const [filterKind, setFilterKind] = useState("all");
-  
+  const [selectedGearKey, setSelectedGearKey] = useState("");
   //scanner
 
-const [scanOpen, setScanOpen] = useState(false);
-const [scannedItem, setScannedItem] = useState(null);
-const videoRef = useRef(null);
-const codeReaderRef = useRef(null);
+  const [scanOpen, setScanOpen] = useState(false);
+  const [scannedItem, setScannedItem] = useState(null);
+  const videoRef = useRef(null);
+  const codeReaderRef = useRef(null);
 
-const scanningLockRef = useRef(false);
+  const scanningLockRef = useRef(false);
+  const [scanAssignQty, setScanAssignQty] = useState(1);
+  const [scanAssignTeamId, setScanAssignTeamId] = useState(teamId);
 
-const normalize = (v) =>
+  const normalize = (v) =>
   String(v || "")
     .toLowerCase()
     .trim()
@@ -2884,82 +2886,160 @@ const gearKinds = useMemo(() => {
     setLowStockAt("");
     setShowForm(false);
   };
+// MOVE GEAR
+const moveGear = async ({
+  direction, // "toTeam" eller "toStock"
+  kind,
+  size,
+  qty,
+  teamIdTarget
+}) => {
 
-  /* ===== ASSIGN ===== */
-  const saveAssignedGear = async () => {
-    const q = Math.max(0, Number(assignQty) || 0);
-    if (!selectedGearKind || q <= 0) return;
+  const q = Math.max(0, Number(qty) || 0);
+  if (!kind || q <= 0) return;
 
-    const next = [...teamGear];
+  // ✅ 1. uppdatera lager
+  let nextItems = items;
 
-    const existing = next.find(
+  if (direction === "toTeam") {
+    // dra från lager
+    nextItems = items.map((x) => {
+      if (
+        x.kind === kind &&
+        (x.size || "") === (size || "")
+      ) {
+        return {
+          ...x,
+          qty: Math.max(0, (Number(x.qty) || 0) - q)
+        };
+      }
+      return x;
+    });
+  }
+
+  if (direction === "toStock") {
+    // lägg tillbaka i lager
+    const existing = items.find(
+      (x) => x.kind === kind && (x.size || "") === (size || "")
+    );
+
+    if (existing) {
+      nextItems = items.map((x) =>
+        x.kind === kind && (x.size || "") === (size || "")
+          ? { ...x, qty: (Number(x.qty) || 0) + q }
+          : x
+      );
+    } else {
+      nextItems = [
+        ...items,
+        { id: uuid(), kind, size, qty: q }
+      ];
+    }
+  }
+
+  // ✅ 2. uppdatera team
+  let nextTeam = [...teamGear];
+
+  if (direction === "toTeam") {
+    const existing = nextTeam.find(
       (x) =>
-        x.kind === selectedGearKind &&
-        (x.size || "") === (selectedGearSize || "")
+        x.kind === kind &&
+        (x.size || "") === (size || "")
     );
 
     if (existing) existing.qty += q;
-    else next.push({ kind: selectedGearKind, size: selectedGearSize, qty: q });
+    else nextTeam.push({ kind, size, qty: q });
+  }
 
-    const res = await assignSportsGearToTeam(teamId, next);
+  if (direction === "toStock") {
+    nextTeam = nextTeam
+      .map((x) =>
+        x.kind === kind && (x.size || "") === (size || "")
+          ? { ...x, qty: x.qty - q }
+          : x
+      )
+      .filter((x) => x.qty > 0);
+  }
 
-    setTeamGear(res.teamGear);
-    setSportsGearStock(res.stock);
-    setAssignGearOpen(false);
-  };
+  // ✅ 3. spara
+  await apiSaveTeamGear(teamIdTarget || teamId, nextTeam);
+  await persistItems(nextItems);
+
+  // ✅ 4. sätt state
+  setTeamGear(nextTeam);
+};
+
+  /* ===== ASSIGN ===== */
+
+const saveAssignedGear = async () => {
+  await moveGear({
+    direction: "toTeam",
+    kind: selectedGearKind,
+    size: selectedGearSize,
+    qty: assignQty,
+    teamIdTarget: teamId
+  });
+
+  setAssignQty("");
+  setAssignGearOpen(false);
+};
+
 
   /* ===== RETURN ===== */
-  const returnGearToStock = async (kind, size) => {
-    const item = teamGear.find(
-      (x) => x.kind === kind && (x.size || "") === (size || "")
-    );
-    if (!item) return;
+ const returnGearToStock = async (kind, size) => {
+  const item = teamGear.find(
+    (x) => x.kind === kind && (x.size || "") === (size || "")
+  );
 
-    if (!confirm("Returnera material?")) return;
+  if (!item) return;
 
-    const qtyNum = Number(item.qty) || 0;
+  if (!confirm("Returnera material?")) return;
 
-    const nextTeam = teamGear.filter(
-      (x) => !(x.kind === kind && (x.size || "") === (size || ""))
-    );
+  await moveGear({
+    direction: "toStock",
+    kind,
+    size,
+    qty: item.qty
+  });
+};
 
-    const stock = [...sportsGearStock];
-    const existing = stock.find(
-      (s) => s.kind === kind && (s.size || "") === (size || "")
-    );
-
-    if (existing) existing.qty += qtyNum;
-    else stock.push({ kind, size, qty: qtyNum });
-
-    await apiSaveTeamGear(teamId, nextTeam);
-    await apiSaveSportsGear(stock);
-
-    setTeamGear(nextTeam);
-    setSportsGearStock(stock);
-  };
 
   /* ===== UI ===== */
   return (
     <div>
+
       {/* ✅ TEAM */}
-<div className="pageHeader">
-  <div className="pageHeader__top">
-    <div className="pageHeader__title">Lagets material</div>
 
-    {isAdmin && (
-      <button
-        className="btn btn--ghost"
-        onClick={() => setAssignGearOpen((p) => !p)}
+{isAdmin && (
+  <div className="pageHeader">
+
+    <div className="pageHeader__top">
+
+      <div
+        className="pageHeader__title"
+        style={{ cursor: "pointer" }}
+        onClick={() => setTeamSectionOpen(p => !p)}
       >
-        Tilldela
-      </button>
-    )}
-  </div>
+        Lagets material {teamSectionOpen ? "▲" : "▼"}
+      </div>
 
-  <div className="history" style={{ marginTop: 10 }}>
-    {groupedTeamGear.length === 0 && (
-      <div className="empty">Inget material</div>
-    )}
+      {isAdmin && (
+        <button
+          className="btn btn--ghost"
+          onClick={() => setAssignGearOpen((p) => !p)}
+        >
+          Tilldela
+        </button>
+      )}
+    </div>
+
+    {/* ✅ CONTENT (bara när öppet) */}
+    {teamSectionOpen && (
+      <div className="history" style={{ marginTop: 10 }}>
+        {groupedTeamGear.length === 0 && (
+          <div className="empty">Inget material</div>
+        )}
+
 
     
 {groupedTeamGear
@@ -3007,27 +3087,40 @@ const gearKinds = useMemo(() => {
             ↩️
           </button>
         )}
-      </div>
-    ))}
-  </div>
+      
 </div>
+          ))}
+      </div>
+    )}
 
+  </div>
+)}
 
       {/* ✅ ASSIGN PANEL */}
       {assignGearOpen && isAdmin && (
         <div className="card">
           <div className="formGrid">
-            <select onChange={(e) => setSelectedGearKind(e.target.value)}>
-              <option value="">Typ</option>
-              {Object.keys(gearLabels).map((k) => (
-                <option key={k} value={k}>{gearLabels[k]}</option>
-              ))}
-            </select>
+               <select
+  value={selectedGearKey}
+  onChange={(e) => {
+    const val = e.target.value;
+    setSelectedGearKey(val);
 
-            <input
-              placeholder="Storlek"
-              onChange={(e) => setSelectedGearSize(e.target.value)}
-            />
+    const [kind, size] = val.split("|");
+    setSelectedGearKind(kind);
+    setSelectedGearSize(size || "");
+  }}
+>
+  <option value="">Välj artikel</option>
+
+  {items.map(g => (
+    <option key={g.id} value={`${g.kind}|${g.size || ""}`}>
+      {gearLabels[g.kind]} {g.size || ""} ({g.qty})
+    </option>
+  ))}
+</select>
+
+
 
             <input
               placeholder="Antal"
@@ -3490,6 +3583,7 @@ onClick={() =>
         </div>
       </div>
 
+
       {/* ✅ SCANNER DIALOG */}
 {scanOpen && (
   <div
@@ -3626,20 +3720,56 @@ onClick={() =>
 
       </div>
 
-      {isAdmin && (
-        <button
-          className="btn btn--ok"
-          style={{ marginTop: 10 }}
-          onClick={() => {
-            setSelectedGearKind(scannedItem.kind);
-            setSelectedGearSize(scannedItem.size);
-            setAssignGearOpen(true);
-            setScannedItem(null);
-          }}
-        >
-          Tilldela
-        </button>
-      )}
+{isAdmin && (
+  <div style={{ marginTop: 12, display: "grid", gap: 8 }}>
+
+    {/* ✅ ANTAL */}
+    <input
+      type="number"
+      min="1"
+      value={scanAssignQty}
+      onChange={(e) => setScanAssignQty(e.target.value)}
+      className="field"
+      placeholder="Antal"
+    />
+
+    {/* ✅ VÄLJ LAG */}
+    <select
+      value={scanAssignTeamId}
+      onChange={(e) => setScanAssignTeamId(e.target.value)}
+    >
+      {DEFAULT_TEAMS.map(t => (
+        <option key={t.id} value={t.id}>
+          {t.name}
+        </option>
+      ))}
+    </select>
+
+    {/* ✅ TILLDELA DIREKT */}
+<button
+  className="btn btn--ok"
+  onClick={async () => {
+    const qty = Math.max(1, Number(scanAssignQty) || 1);
+
+    await moveGear({
+      direction: "toTeam",
+      kind: scannedItem.kind,
+      size: scannedItem.size,
+      qty,
+      teamIdTarget: scanAssignTeamId
+    });
+
+    // ✅ reset UI
+    setScanAssignQty(1);
+    setScannedItem(null);
+    scanningLockRef.current = false;
+  }}
+>
+  ✅ Tilldela
+</button>
+
+  </div>
+)}
 
       <button
         className="btn btn--ghost"
