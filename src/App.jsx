@@ -5649,6 +5649,7 @@ if (route === "/matchkit")
         activeTeamId={activeTeamId}
         setActiveTeamId={setActiveTeamId}
         nav={nav}
+        onLogout={auth.logout} 
       />
 
       <main className="content">
