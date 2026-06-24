@@ -1089,6 +1089,15 @@ function WarehouseMatchkitPage({ user }) {
   const [items, setItems] = useState([]);
   const [importMode, setImportMode] = useState("append");
 
+  //SKanning
+  
+  const [scanOpen, setScanOpen] = useState(false);
+  const [scannedItem, setScannedItem] = useState(null);
+  const videoRef = useRef(null);
+  const codeReaderRef = useRef(null);
+  const scanningLockRef = useRef(false);
+
+
   // enkel tilldelning
   const [assigningId, setAssigningId] = useState(null);
   const [assignTeamId, setAssignTeamId] = useState("");
@@ -1118,6 +1127,8 @@ const [showToolsMobile, setShowToolsMobile] = useState(false);
   const [stockSizeInput, setStockSizeInput] = useState("");
   const [stockQtyInput, setStockQtyInput] = useState("");
 
+  const { jerseys, stock } = splitWarehouse(items);
+
   useEffect(() => {
     apiLoadWarehouse().then((w) => setItems(normalizeWarehouse(w)));
   }, []);
@@ -1131,7 +1142,153 @@ const [showToolsMobile, setShowToolsMobile] = useState(false);
     );
   }
 
-  const { jerseys, stock } = splitWarehouse(items);
+useEffect(() => {
+  if (!scanOpen) return;
+
+  const reader = new BrowserMultiFormatReader();
+  codeReaderRef.current = reader;
+  scanningLockRef.current = false;
+
+  reader.decodeFromVideoDevice(
+    null,
+    videoRef.current,
+    (result, err) => {
+
+      if (!result) return;
+      if (scanningLockRef.current) return;
+
+      scanningLockRef.current = true;
+
+      const text = result.getText().replace(/\s/g, "").toLowerCase();
+
+      if (!text.startsWith("gear:")) {
+        scanningLockRef.current = false;
+        return;
+      }
+
+      const raw = text.replace("gear:", "");
+
+      // ✅ matcha mot warehouse stock
+      
+      const found = stock.find(
+
+        (x) =>
+          `${x.kind}|${x.size || ""}`.toLowerCase() === raw
+      );
+
+      if (found) {
+        navigator.vibrate?.(50);
+
+        setScannedItem(found);
+        setScanOpen(false);
+      } else {
+        alert("Ingen match i lager");
+        scanningLockRef.current = false;
+      }
+    }
+  );
+
+  return () => {
+    try {
+      reader.reset();
+    } catch {}
+    scanningLockRef.current = false;
+  };
+}, [scanOpen, stock]);
+
+const exportStockQrPdf = async () => {
+  const doc = new jsPDF("p", "mm", "a4");
+
+  const cols = 4;
+  const rows = 6;
+
+  const labelSize = 40;
+
+  const marginX = 15.45; // ✅ exakt mätt
+  const marginY = 13.55; // ✅ exakt mätt
+
+  const gap = 5.85; // ✅ mellanrum
+
+  const qrSize = 30;
+
+  let index = 0;
+
+  const list = stock
+    .slice()
+    .sort((a, b) => (a.kind + a.size).localeCompare(b.kind + b.size, "sv"));
+
+  for (let r = 0; r < rows; r++) {
+    for (let c = 0; c < cols; c++) {
+
+      if (index >= list.length) break;
+
+      const g = list[index];
+
+      const value = `gear:${g.kind}|${g.size || ""}`;
+      const qrDataUrl = await QRCodeLib.toDataURL(value);
+
+      // ✅ RÄTT PLACERING
+      const x = marginX + c * (labelSize + gap);
+      const y = marginY + r * (labelSize + gap);
+
+      // ✅ centrerad QR
+      const qrX = x + (labelSize - qrSize) / 2;
+      const qrY = y + 4;
+
+      doc.addImage(qrDataUrl, "PNG", qrX, qrY, qrSize, qrSize);
+
+      // ✅ text
+      doc.setFontSize(7);
+
+      const label = `${kindLabel(g.kind)} ${g.size || ""}`;
+
+      doc.text(
+        label,
+        x + labelSize / 2,
+        y + labelSize - 3,
+        { align: "center" }
+      );
+
+      index++;
+    }
+  }
+
+  doc.save("qr-warehouse-etiketter.pdf");
+};
+
+const adjustWarehouseStock = async (kind, size, delta) => {
+  const next = [...items];
+
+
+  
+const target = next.find(
+  (x) =>
+    x.type !== "jersey" &&
+    x.kind === kind &&
+    (x.size || "") === (size || "")
+);
+
+
+  if (!target) return;
+
+  target.qty = Math.max(0, (Number(target.qty) || 0) + delta);
+
+  const cleaned = next.filter((x) => (Number(x.qty) || 0) > 0);
+
+  await apiSaveWarehouse(cleaned);
+  setItems(cleaned);
+
+  // ✅ uppdatera dialogen
+  const updated = cleaned.find(
+    (x) => x.kind === kind && (x.size || "") === (size || "")
+  );
+
+  if (updated) {
+    setScannedItem(updated);
+  } else {
+    setScannedItem(null);
+  }
+};
 
   const sizes = useMemo(() => {
     const set = new Set(jerseys.map((i) => i.size).filter(Boolean));
@@ -1634,6 +1791,23 @@ const stickyWrapStyle = {
     onClick={reload}
   >
     🔄
+  </button>
+  
+  <button
+    className="btn btn--ghost"
+    onClick={() => {
+      scanningLockRef.current = false;
+      setScanOpen(true);
+    }}
+  >
+    📷 Skanna
+  </button>
+  
+  <button
+    className="btn btn--ghost"
+    onClick={exportStockQrPdf}
+  >
+    🧾 Exportera QR
   </button>
 
   {/* ✅ PILLS TILL HÖGER */}
@@ -2159,7 +2333,52 @@ const stickyWrapStyle = {
           </div>
         ))}
       </div>
+
+      {scanOpen && (
+  <div className="overlay">
+    <div className="card">
+      <div className="card__title">📷 Skanna</div>
+
+      <video
+        ref={videoRef}
+        autoPlay
+        playsInline
+        muted
+        style={{ width: "100%", borderRadius: 12 }}
+      />
+
+      <button onClick={() => setScanOpen(false)}>Stäng</button>
     </div>
+  </div>
+)}
+
+{scannedItem && (
+  <div className="overlay">
+    <div className="card">
+
+      <div className="card__title">
+        {scannedItem.kind} {scannedItem.size}
+      </div>
+
+      <div style={{ marginTop: 6 }}>
+        Lager: <strong>{scannedItem.qty}</strong>
+      </div>
+
+      <div style={{ marginTop: 10, display: "flex", gap: 6 }}>
+        <button onClick={() => adjustWarehouseStock(scannedItem.kind, scannedItem.size, -10)}>−10</button>
+        <button onClick={() => adjustWarehouseStock(scannedItem.kind, scannedItem.size, -1)}>−1</button>
+        <button onClick={() => adjustWarehouseStock(scannedItem.kind, scannedItem.size, +1)}>+1</button>
+        <button onClick={() => adjustWarehouseStock(scannedItem.kind, scannedItem.size, +10)}>+10</button>
+      </div>
+
+      <button onClick={() => setScannedItem(null)}>Stäng</button>
+
+    </div>
+  </div>
+)}
+
+    </div>
+    
   );
 }
 
@@ -2332,44 +2551,54 @@ useEffect(() => {
 const exportQrPdf = async () => {
   const doc = new jsPDF("p", "mm", "a4");
 
-  // ✅ exakt från din etikett
   const cols = 4;
   const rows = 6;
 
-  const labelSize = 40; // 40mm x 40mm
+  const labelSize = 40;
 
-  // ✅ marginaler (justeras vid behov)
-  const marginX = 10;
-  const marginY = 12;
+  // ✅ EXAKT dina uppmätta marginaler
+  const marginX = 15.45;
+  const marginY = 13.55;
 
-  // ✅ QR storlek (lite mindre än etiketten)
-  const qrSize = 32;
+  // ✅ EXAKT mellanrum
+  const gap = 5.85;
+
+  const qrSize = 30;
 
   let index = 0;
+
+  const list = items
+    .slice()
+    .sort((a, b) =>
+      (a.kind + a.size).localeCompare(b.kind + b.size, "sv")
+    );
 
   for (let r = 0; r < rows; r++) {
     for (let c = 0; c < cols; c++) {
 
-      if (index >= items.length) break;
+      if (index >= list.length) break;
 
-      const g = items[index];
+      const g = list[index];
 
       const value = `gear:${g.kind}|${g.size || ""}`;
       const qrDataUrl = await QRCodeLib.toDataURL(value);
 
-      const x = marginX + c * labelSize;
-      const y = marginY + r * labelSize;
+      // ✅ RÄTT POSITION
+      const x = marginX + c * (labelSize + gap);
+      const y = marginY + r * (labelSize + gap);
 
-      // ✅ QR centrerad horisontellt
+      // ✅ centrera QR
       const qrX = x + (labelSize - qrSize) / 2;
-      const qrY = y + 3;
+      const qrY = y + 4;
 
       doc.addImage(qrDataUrl, "PNG", qrX, qrY, qrSize, qrSize);
 
-      // ✅ TEXT under QR (centrerad)
+      // ✅ text
       doc.setFontSize(7);
 
-      const label = `${gearLabels[g.kind] || g.kind}${g.size ? " " + g.size : ""}`;
+      const label = `${gearLabels[g.kind] || g.kind}${
+        g.size ? " " + g.size : ""
+      }`;
 
       doc.text(
         label,
@@ -2382,8 +2611,9 @@ const exportQrPdf = async () => {
     }
   }
 
-  doc.save("qr-etiketter-40x40.pdf");
+  doc.save("qr-sportsgear-etiketter.pdf");
 };
+
 
 const adjustStockFromScan = async (kind, size, delta) => {
   const next = [...items];
