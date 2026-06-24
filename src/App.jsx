@@ -2499,6 +2499,11 @@ const codeReaderRef = useRef(null);
 
 const scanningLockRef = useRef(false);
 
+const normalize = (v) =>
+  String(v || "")
+    .toLowerCase()
+    .trim()
+    .replace(/\s+/g, ""); // tar bort alla mellanslag
   // formulär
   const [kind, setKind] = useState("");
   const [size, setSize] = useState("");
@@ -2587,21 +2592,22 @@ useEffect(() => {
           const raw = textClean.replace("gear:", "");
 
           // ✅ EXAKT MATCH först
-          let found = items.find(
-            (x) =>
-              `${x.kind}|${x.size || ""}`.toLowerCase() === raw
-          );
+         
+const [kindRaw, sizeRaw] = raw.split("|");
 
-          // ✅ fallback om något är konstigt (säkerhet)
-          if (!found) {
-            const [kindRaw, sizeRaw] = raw.split("|");
+let found = items.find(
+  (x) =>
+    normalize(x.kind) === normalize(kindRaw) &&
+    normalize(x.size) === normalize(sizeRaw)
+);
 
-            found = items.find(
-              (x) =>
-                x.kind.toLowerCase() === (kindRaw || "") &&
-                (x.size || "") === (sizeRaw || "")
-            );
-          }
+// ✅ fallback om size inte matchar
+if (!found) {
+  found = items.find(
+    (x) => normalize(x.kind) === normalize(kindRaw)
+  );
+}
+
 
           if (found) {
 
