@@ -54,6 +54,14 @@ body{
   flex-wrap: nowrap;
 }
 
+
+.topbar__nav{
+  margin-top: 10px;
+  padding-top: 8px;
+  border-top: 1px solid var(--line);
+}
+
+
 .brand{
   display:flex;
   align-items:center;
@@ -266,14 +274,20 @@ body{
 
 /* ===== TEAM SELECT ===== */
 .team-switcher__select{
-  appearance:none;
-  border:none;
-  background:transparent;
-  color:#fff;
-  font-weight:800;
-  min-height:36px;
-  padding:6px 30px 6px 10px;
-  font-size:14px;
+  appearance: none;
+  -webkit-appearance: none;
+
+  min-height: 36px;
+  padding: 6px 32px 6px 12px;
+
+  border-radius: 12px;
+  border: 1px solid var(--line);
+
+  background: rgba(15,23,42,.55);
+  color: var(--text);
+  font-weight: 800;
+
+  cursor: pointer;
 }
 
 /* ===== UTIL ===== */
