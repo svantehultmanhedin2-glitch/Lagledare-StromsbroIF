@@ -2794,6 +2794,27 @@ const adjustStockFromScan = async (kind, size, delta) => {
     return Object.values(map);
   }
 
+const cancelEditRow = () => {
+  setEditingId(null);
+};
+const saveEditRow = async (g) => {
+  const next = items.map((x) => {
+    if (x.id !== g.id) return x;
+
+    return {
+      ...x,
+      kind: editKind,
+      size: editSize,
+      qty: Math.max(0, Number(editQty) || 0),
+      lowStockAt: Math.max(0, Number(editLowStockAt) || 0),
+    };
+  });
+
+  await persistItems(next);
+
+  cancelEditRow(); // ✅ stänger edit mode
+};
+
   /* ===== TEAM GROUP ===== */
   const groupedTeamGear = useMemo(() => {
     const map = {};
@@ -3338,10 +3359,33 @@ const gearKinds = useMemo(() => {
     {gearIcons[g.kind]} {gearLabels[g.kind] || g.kind}
   </div>
 
-  <div style={{ fontSize: 12, opacity: 0.75 }}>
-    {g.size && `Storlek ${g.size} · `}
-    {g.qty} st · Varning: {g.lowStockAt || 0}
-  </div>
+<div style={{ display: "flex", gap: 8, flexWrap: "wrap", fontSize: 12 }}>
+
+  {g.size && (
+    <span style={{
+      padding: "2px 8px",
+      borderRadius: 999,
+      background: "rgba(30,91,191,.18)",
+      border: "1px solid rgba(30,91,191,.35)",
+      fontWeight: 800
+    }}>
+      Strl {g.size}
+    </span>
+  )}
+
+  <span style={{
+    fontWeight: 900,
+    color: "#fff"
+  }}>
+    {g.qty} st
+  </span>
+
+  <span style={{ opacity: 0.6 }}>
+    Varning: {g.lowStockAt || 0}
+  </span>
+
+</div>
+
 
   {low && (
     <div style={{ color: "#ef4444", fontSize: 12, fontWeight: 700 }}>
@@ -3368,7 +3412,17 @@ const gearKinds = useMemo(() => {
                           className="iconBtn"
                           title="Minska"
                           style={{ minWidth: 36, minHeight: 36 }}
-                          onClick={() => updateGroupedQty(g.kind, g.size, -1)}
+                          
+onClick={() =>
+  persistItems(
+    items.map(x =>
+      x.kind === g.kind && (x.size || "") === (g.size || "")
+        ? { ...x, qty: Math.max(0, (Number(x.qty) || 0) - 1) }
+        : x
+    )
+  )
+}
+
                         >
                           ➖
                         </button>
@@ -3377,7 +3431,17 @@ const gearKinds = useMemo(() => {
                           className="iconBtn"
                           title="Öka"
                           style={{ minWidth: 36, minHeight: 36 }}
-                          onClick={() => updateGroupedQty(g.kind, g.size, +1)}
+                          
+onClick={() =>
+  persistItems(
+    items.map(x =>
+      x.kind === g.kind && (x.size || "") === (g.size || "")
+        ? { ...x, qty: (Number(x.qty) || 0) + 1 }
+        : x
+    )
+  )
+}
+
                         >
                           ➕
                         </button>
@@ -3386,7 +3450,15 @@ const gearKinds = useMemo(() => {
                           className="iconBtn"
                           title="Redigera rad"
                           style={{ minWidth: 36, minHeight: 36 }}
-                          onClick={() => startEditRow(g)}
+                          
+onClick={() => {
+  setEditingId(g.id);
+  setEditKind(g.kind);
+  setEditSize(g.size || "");
+  setEditQty(g.qty);
+  setEditLowStockAt(g.lowStockAt || 0);
+}}
+
                         >
                           ✏️
                         </button>
@@ -3395,7 +3467,15 @@ const gearKinds = useMemo(() => {
                           className="iconBtn danger"
                           title="Ta bort rad"
                           style={{ minWidth: 36, minHeight: 36 }}
-                          onClick={() => removeGroupedRow(g.kind, g.size)}
+                          
+onClick={() =>
+  persistItems(
+    items.filter(
+      x => !(x.kind === g.kind && (x.size || "") === (g.size || ""))
+    )
+  )
+}
+
                         >
                           🗑️
                         </button>

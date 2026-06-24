@@ -396,3 +396,25 @@ select{
   }
 
 }
+
+.historyRow__title{
+  font-size: 14px;
+  font-weight: 900;
+}
+
+.historyRow__title span{
+  font-weight: 1000; 
+  color: #ffffff; 
+}
+
+.historyRow__sub strong{
+  font-size: 15px; 
+  font-weight: 950;
+  color: #ffffff;
+}
+
+.historyRow__sub{
+  font-size: 12px;
+  color: rgba(157,179,216,.7); 
+}
+
