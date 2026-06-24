@@ -6006,33 +6006,37 @@ const isDone = (task) => {
 
       </div>
 
-      {/* SCANNER DIALOG */}
-      {scanOpen && (
-        <div className="modalOverlay">
+{scanOpen && (
+  <div className="scanOverlay">
 
-          <div className="modalSheet">
+    <div className="scanModal">
 
-            <div className="modalHeader">
-              <div className="modalTitle">📷 Skanna</div>
-              <button className="iconBtn" onClick={() => setScanOpen(false)}>✖️</button>
-            </div>
+      <div className="modalHeader">
+        <div className="modalTitle">📷 Skanna</div>
+        <button
+          className="iconBtn"
+          onClick={() => {
+            setScanOpen(false);
+            scanningLockRef.current = false;
+          }}
+        >
+          ✖️
+        </button>
+      </div>
 
-            <div className="modalBody">
-              
-              <video
-                ref={videoRef}
-                autoPlay
-                playsInline
-                muted
-                style={{ width: "100%", borderRadius: 12 }}
-              />
+      <video
+        ref={videoRef}
+        autoPlay
+        playsInline
+        muted
+        className="scanVideo"
+      />
 
-            </div>
+    </div>
 
-          </div>
+  </div>
+)}
 
-        </div>
-      )}
 
     </div>
   );

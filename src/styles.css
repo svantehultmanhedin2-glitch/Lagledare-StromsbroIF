@@ -417,4 +417,31 @@ select{
   font-size: 12px;
   color: rgba(157,179,216,.7); 
 }
+/* ✅ FULLSCREEN overlay */
+.scanOverlay{
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,.85);
+  z-index: 9999;
+
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  padding: 16px;
+}
+
+/* ✅ scanner card */
+.scanModal{
+  width: 100%;
+  max-width: 420px;
+  background: #111;
+  border-radius: 16px;
+  padding: 12px;
+}
+
+/* ✅ video */
+.scanVideo{
+  width: 100%;
+  border-radius: 12px;
+}
 
