@@ -1133,14 +1133,7 @@ const [showToolsMobile, setShowToolsMobile] = useState(false);
     apiLoadWarehouse().then((w) => setItems(normalizeWarehouse(w)));
   }, []);
 
-  if (user.role !== "admin") {
-    return (
-      <div className="card">
-        <div className="card__title">Huvudlager</div>
-        <div className="empty">Endast admin</div>
-      </div>
-    );
-  }
+
 
 useEffect(() => {
   if (!scanOpen) return;
@@ -1195,6 +1188,15 @@ useEffect(() => {
     scanningLockRef.current = false;
   };
 }, [scanOpen, stock]);
+
+  if (user.role !== "admin") {
+    return (
+      <div className="card">
+        <div className="card__title">Huvudlager</div>
+        <div className="empty">Endast admin</div>
+      </div>
+    );
+  }
 
 const exportStockQrPdf = async () => {
   const doc = new jsPDF("p", "mm", "a4");
