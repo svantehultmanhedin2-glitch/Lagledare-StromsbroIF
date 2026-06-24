@@ -3074,11 +3074,6 @@ const gearKinds = useMemo(() => {
     )}
   </div>
 </div>
-        <div className="pageHeader__meta">{items.length}</div>
-        
-<div className="pageHeader__meta">
-  Materialrader i lager · totalt {totalQty} st
-</div>
 
 {items.some(isLowStock) && (
   <div style={{ marginTop: 6, color: "#ef4444", fontWeight: 700 }}>
