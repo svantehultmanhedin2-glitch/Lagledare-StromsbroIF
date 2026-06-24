@@ -1050,42 +1050,49 @@ function Topbar({ user, teamsVisible, activeTeamId, setActiveTeamId, nav, route,
     <header className="topbar">
 
       {/* RAD 1 */}
-      <div className="topbar__row">
+<div className="topbar__row">
 
-        <div className="brand">
-          <div className="brand__logo">SIF</div>
-          <div className="brand__text">
-            <div className="title">Lagledarapp</div>
-            <div className="subtitle">
-              {user.role === "admin" ? "Adminläge" : "Ledarläge"} · {user.name}
-            </div>
-          </div>
-        </div>
+  {/* ✅ VÄNSTER: LOGO + TITEL */}
+  <div className="brand">
+    <div className="brand__logo">SIF</div>
 
-        <div className="actions">
-
-          {/* ✅ TEAMS */}
-          <div className="team-switcher">
-            <select
-              value={activeTeamId}
-              onChange={(e) => setActiveTeamId(e.target.value)}
-              className="team-switcher__select"
-            >
-              {teamsVisible.map((t) => (
-                <option key={t.id} value={t.id}>
-                  {t.name}
-                </option>
-              ))}
-            </select>
-          </div>
-
-          {/* ✅ LOGOUT */}
-          <button className="btn btn--danger" onClick={onLogout}>
-            Logga ut
-          </button>
-
-        </div>
+    <div className="brand__text">
+      <div className="title">Lagledarapp</div>
+      <div className="subtitle">
+        {user.role === "admin" ? "Adminläge" : "Ledarläge"} · {user.name}
       </div>
+    </div>
+  </div>
+
+  {/* ✅ HÖGER: TEAM + LOGOUT */}
+  <div className="actions" style={{ display: "flex", gap: 6, alignItems: "center" }}>
+
+    {/* ✅ TEAM */}
+    <select
+      value={activeTeamId}
+      onChange={(e) => setActiveTeamId(e.target.value)}
+      className="team-switcher__select"
+      style={{ maxWidth: 140 }}
+    >
+      {teamsVisible.map((t) => (
+        <option key={t.id} value={t.id}>
+          {t.name}
+        </option>
+      ))}
+    </select>
+
+    {/* ✅ LOGOUT IKON */}
+    <button
+      className="iconBtn danger"
+      onClick={onLogout}
+      title="Logga ut"
+    >
+      🚪
+    </button>
+
+  </div>
+
+</div>
 
       {/* ✅ RAD 2 – NAV */}
       <div className="topbar__nav">
@@ -2908,9 +2915,9 @@ const gearKinds = useMemo(() => {
   return (
     <div>
       {/* ✅ TEAM */}
-<div className="card" style={{ marginTop: 12 }}>
-  <div className="card__top">
-    <div className="card__title">Lagets material</div>
+<div className="pageHeader">
+  <div className="pageHeader__top">
+    <div className="pageHeader__title">Lagets material</div>
 
     {isAdmin && (
       <button
@@ -3019,7 +3026,7 @@ const gearKinds = useMemo(() => {
   }}
 >
   {/* ✅ TITEL */}
-  <div className="summaryTitle">Idrottsmaterial</div>
+  <div className="pageHeader__title">Idrottsmaterial</div>
 
   {/* ✅ KNAPPGRUPP */}
   <div
@@ -3061,9 +3068,9 @@ const gearKinds = useMemo(() => {
     )}
   </div>
 </div>
-        <div className="summaryValue">{items.length}</div>
+        <div className="pageHeader__meta">{items.length}</div>
         
-<div className="summarySub">
+<div className="pageHeader__meta">
   Materialrader i lager · totalt {totalQty} st
 </div>
 
@@ -3898,12 +3905,14 @@ const returnToWarehouse = async (itemId) => {
   return (
     <div>
       {/* Översikt */}
-      <div className="summaryCard">
-        <div className="summaryTitle">Matchtröjor ({teamId})</div>
-        <div className="summaryValue">
+      
+<div className="pageHeader">
+
+        <div className="pageHeader__title">Matchtröjor ({teamId})</div>
+        <div className="pageHeader__meta">
           {assignedCount}/{items.length}
         </div>
-        <div className="summarySub">Tilldelade / Totalt</div>
+        <div className="pageHeader__sub">Tilldelade / Totalt</div>
         
   <button
     className="iconBtn"
@@ -4611,12 +4620,11 @@ function LeaderClothesV2Page({ user, teamId }) {
     <div>
 
       {/* ✅ ÖVERSIKT */}
-      <div className="summaryCard">
-        <div className="summaryTitle">Ledarkläder – {teamId}</div>
-        <div className="summaryValue">{groupedEntries.length}</div>
-        <div className="summarySub">
-          Ledare med plagg · {entries.length} utdelningar
-        </div>
+      
+<div className="pageHeader">
+
+        <div className="pageHeader__title">Ledarkläder – {teamId}</div>
+        
 
         {/* ✅ KNAPP – ADMIN ONLY */}
         {isAdmin && (
@@ -4987,14 +4995,16 @@ function TeamCashPage({ user, teamId }) {
 
   return (
     <div>
-      <div className="summaryCard">
-        <div className="summaryTitle">Lagkassa</div>
+      
+<div className="pageHeader">
 
-        <div className="summaryValue">
+        <div className="pageHeader__title">Lagkassa</div>
+
+        <div className="pageHeader__meta">
           {loading ? "…" : (cash?.balance ?? "—")} kr
         </div>
 
-        <div className="summarySub">
+        <div className="pageHeader__sub">
           {cash?.updatedAt
             ? "Uppdaterad " + new Date(cash.updatedAt).toLocaleDateString()
             : "Ingen import ännu"}
