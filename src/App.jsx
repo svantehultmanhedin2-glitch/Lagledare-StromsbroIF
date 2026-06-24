@@ -5408,17 +5408,7 @@ if (route === "/matchkit")
       />
 
       <main className="content">
-        <div
-          className="actions"
-          style={{ justifyContent: "space-between", marginBottom: 12 }}
-        >
-          <div className="muted" style={{ fontWeight: 900 }}>
-            Aktivt lag: {activeTeamId}
-          </div>
-          <button className="btn btn--ghost" onClick={() => auth.logout()}>
-            Logga ut
-          </button>
-        </div>
+        
 
         {renderPage()}
       </main>
