@@ -1025,10 +1025,33 @@ function Login({ users, onLogin }) {
 }
 
 /* ================= Topbar ================= */
-function Topbar({ user, teamsVisible, activeTeamId, setActiveTeamId, nav }) {
+function Topbar({ user, teamsVisible, activeTeamId, setActiveTeamId, nav, route, onLogout }) {
+
+  const isMobile = window.innerWidth < 700;
+
+  const navItems = [
+    { path: "/matchkit", label: "Matchkläder" },
+    { path: "/leaderclothes", label: "Ledarkläder" },
+    { path: "/teamcash", label: "Lagkassa" },
+  ];
+
+  if (user.role === "admin") {
+    navItems.unshift(
+      { path: "/warehouse", label: "Huvudlager" },
+      { path: "/sportsgear", label: "Idrottsmaterial" }
+    );
+    navItems.push(
+      { path: "/admin", label: "Admin" },
+      { path: "/reports", label: "Rapporter" }
+    );
+  }
+
   return (
     <header className="topbar">
+
+      {/* RAD 1 */}
       <div className="topbar__row">
+
         <div className="brand">
           <div className="brand__logo">SIF</div>
           <div className="brand__text">
@@ -1039,47 +1062,67 @@ function Topbar({ user, teamsVisible, activeTeamId, setActiveTeamId, nav }) {
           </div>
         </div>
 
+        <div className="actions">
 
-<div className="actions">
-  <div className="team-switcher">
-    <select
-      value={activeTeamId}
-      onChange={(e) => setActiveTeamId(e.target.value)}
-      className="team-switcher__select"
-      aria-label="Välj lag"
-    >
-      {teamsVisible.map((t) => (
-        <option key={t.id} value={t.id}>
-          {t.name}
-        </option>
-      ))}
-    </select>
-  </div>
+          {/* ✅ TEAMS */}
+          <div className="team-switcher">
+            <select
+              value={activeTeamId}
+              onChange={(e) => setActiveTeamId(e.target.value)}
+              className="team-switcher__select"
+            >
+              {teamsVisible.map((t) => (
+                <option key={t.id} value={t.id}>
+                  {t.name}
+                </option>
+              ))}
+            </select>
+          </div>
 
- </div>
+          {/* ✅ LOGOUT */}
+          <button className="btn btn--danger" onClick={onLogout}>
+            Logga ut
+          </button>
+
+        </div>
+      </div>
+
+      {/* ✅ RAD 2 – NAV */}
+      <div className="topbar__nav">
+
+        {isMobile ? (
+          // ✅ MOBIL DROPDOWN
+          <select
+            value={route}
+            onChange={(e) => nav(e.target.value)}
+            className="topbar__navSelect"
+          >
+            {navItems.map((item) => (
+              <option key={item.path} value={item.path}>
+                {item.label}
+              </option>
+            ))}
+          </select>
+        ) : (
+          // ✅ DESKTOP KNAPPAR
+          navItems.map((item) => (
+            <button
+              key={item.path}
+              className={`btn btn--ghost ${
+                route === item.path ? "active" : ""
+              }`}
+              onClick={() => nav(item.path)}
+            >
+              {item.label}
+            </button>
+          ))
+        )}
+
       </div>
     </header>
   );
 }
 
-function BottomNav({ route, nav, user }) {
-  return (
-    <nav className="bottom-nav">
-
-{user.role === "admin" && (
-  <NavButton active={route === "/warehouse"} label="Huvudlager" onClick={() => nav("/warehouse")} />
-)}
-{user.role === "admin" && (
-  <NavButton active={route === "/sportsgear"} label="Idrottsmaterial" onClick={() => nav("/sportsgear")} />
-)}
-<NavButton active={route === "/matchkit"} label="Matchkläder" onClick={() => nav("/matchkit")} />
-      <NavButton active={route === "/leaderclothes"} label="Ledarkläder" onClick={() => nav("/leaderclothes")} />
-      <NavButton active={route === "/teamcash"} label="Lagkassa" onClick={() => nav("/teamcash")} />
-      {user.role === "admin" && <NavButton active={route === "/admin"} label="Admin" onClick={() => nav("/admin")} />}
-      {user.role === "admin" && <NavButton active={route === "/reports"} label="Rapporter" onClick={() => nav("/reports")} />}
-    </nav>
-  );
-}
 
 /* ================= HUVUDLAGER: Matchkläder (Warehouse) ================= */
 
@@ -5379,8 +5422,6 @@ if (route === "/matchkit")
 
         {renderPage()}
       </main>
-
-      <BottomNav route={route} nav={nav} user={auth.user} />
     </div>
   );
 }

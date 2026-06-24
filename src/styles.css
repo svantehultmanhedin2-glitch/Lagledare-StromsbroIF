@@ -261,3 +261,19 @@ input,
 select {
   transition: all 0.16s ease;
 }
+.topbar__nav {
+  display: flex;
+  gap: 8px;
+  margin-top: 8px;
+  flex-wrap: wrap;
+}
+
+.topbar__navSelect {
+  width: 100%;
+  padding: 8px;
+  border-radius: 10px;
+}
+
+.btn.active {
+  outline: 2px solid #1e5bbf;
+}
