@@ -370,3 +370,29 @@ select{
 .pageHeader__filters{
   margin-top: 10px;
 }
+.desktopOnly{
+  display:flex;
+}
+
+.mobileOnly{
+  display:none;
+}
+
+@media (max-width: 700px){
+
+  .desktopOnly{
+    display:none; 
+  }
+
+  .mobileOnly{
+    display:flex; 
+    gap: 8px;
+    margin-top: 10px;
+    flex-wrap: wrap;
+  }
+
+  .mobileOnly .btn{
+    flex: 1;
+  }
+
+}

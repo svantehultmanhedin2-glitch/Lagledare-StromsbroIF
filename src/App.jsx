@@ -3035,6 +3035,8 @@ const gearKinds = useMemo(() => {
   <div className="pageHeader__title">Idrottsmaterial</div>
 
   {/* ✅ KNAPPGRUPP */}
+  
+  <div className="pageHeader__actions desktopOnly">
   <div
     style={{
       display: "flex",
@@ -3072,7 +3074,29 @@ const gearKinds = useMemo(() => {
         🧾 Exportera
       </button>
     )}
+    </div>
   </div>
+    <div className="pageHeader__actions mobileOnly">
+      {/* Lägg till */}
+    {isAdmin && (
+      <button
+        className="btn btn--primary"
+        onClick={() => setShowForm(true)}
+      >
+        + Lägg till
+      </button>
+    )}
+
+    {/* Skanna */}
+    {isAdmin && (
+    <button
+      className="btn btn--ghost"
+      onClick={() => setScanOpen(true)}
+    >
+      📷 Skanna
+    </button>
+    )}
+</div>
 </div>
 
 {items.some(isLowStock) && (
